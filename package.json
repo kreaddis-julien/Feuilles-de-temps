@@ -1,0 +1,15 @@
+{
+  "name": "timesheet-tracker",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"bun run dev:server\" \"bun run dev:client\"",
+    "dev:server": "cd server && bun run dev",
+    "dev:client": "cd client && bun run dev",
+    "test": "concurrently \"bun run test:server\" \"bun run test:client\"",
+    "test:server": "cd server && bun run test",
+    "test:client": "cd client && bun run test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
