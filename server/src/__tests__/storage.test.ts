@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { Storage } from '../storage.js';
 
-const TEST_DATA_DIR = path.join(import.meta.dirname, '../../data-test');
+const TEST_DATA_DIR = path.join(import.meta.dirname, '../../data-test-storage');
 
 describe('Storage', () => {
   let storage: Storage;

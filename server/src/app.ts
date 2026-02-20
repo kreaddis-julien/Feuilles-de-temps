@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { Storage } from './storage.js';
 import { createProjectsRouter } from './routes/projects.js';
+import { createTimesheetRouter } from './routes/timesheet.js';
 
 export function createApp(dataDir: string) {
   const app = express();
@@ -15,6 +16,7 @@ export function createApp(dataDir: string) {
   });
 
   app.use('/api/projects', createProjectsRouter(storage));
+  app.use('/api/timesheet', createTimesheetRouter(storage));
 
   return app;
 }

@@ -4,7 +4,7 @@ import path from 'path';
 import request from 'supertest';
 import { createApp } from '../app.js';
 
-const TEST_DATA_DIR = path.join(import.meta.dirname, '../../data-test');
+const TEST_DATA_DIR = path.join(import.meta.dirname, '../../data-test-projects');
 
 describe('Projects API', () => {
   let app: ReturnType<typeof createApp>;
