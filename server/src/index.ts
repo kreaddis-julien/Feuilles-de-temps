@@ -1,17 +1,10 @@
-import express from 'express';
-import cors from 'cors';
+import path from 'path';
+import { createApp } from './app.js';
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok' });
-});
+const DATA_DIR = path.join(import.meta.dirname, '../../data');
+const app = createApp(DATA_DIR);
 
 const PORT = 3001;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
-
-export default app;
