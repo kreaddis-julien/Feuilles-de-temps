@@ -7,19 +7,24 @@ export function roundUp15(minutes: number): number {
 
 export function calcSegmentMinutes(segment: Segment): number {
   if (!segment.end) return 0;
-  return timeToMinutes(segment.end) - timeToMinutes(segment.start);
+  return Math.floor(
+    (new Date(segment.end).getTime() - new Date(segment.start).getTime()) / 60000,
+  );
 }
 
 export function calcTotalMinutes(segments: Segment[]): number {
   return segments.reduce((sum, seg) => sum + calcSegmentMinutes(seg), 0);
 }
 
-export function nowHHmm(): string {
-  const now = new Date();
-  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+export function nowTimestamp(): string {
+  return new Date().toISOString();
 }
 
-function timeToMinutes(hhmm: string): number {
-  const [h, m] = hhmm.split(':').map(Number);
-  return h * 60 + m;
+/** Extract HH:mm from an ISO timestamp for display/CSV. */
+export function toHHmm(isoOrHhmm: string): string {
+  if (isoOrHhmm.includes('T')) {
+    const d = new Date(isoOrHhmm);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+  return isoOrHhmm;
 }

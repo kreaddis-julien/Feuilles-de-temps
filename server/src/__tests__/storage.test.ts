@@ -17,21 +17,21 @@ describe('Storage', () => {
     await fs.rm(TEST_DATA_DIR, { recursive: true, force: true });
   });
 
-  describe('projects', () => {
-    it('returns empty projects list when file does not exist', async () => {
-      const data = await storage.loadProjects();
-      expect(data.projects).toEqual([]);
+  describe('activities', () => {
+    it('returns empty activities list when file does not exist', async () => {
+      const data = await storage.loadActivities();
+      expect(data.activities).toEqual([]);
     });
 
-    it('saves and loads projects', async () => {
-      const projects = {
-        projects: [
-          { id: 'p1', name: 'Test', category: 'client' as const, tasks: [] },
+    it('saves and loads activities', async () => {
+      const activities = {
+        activities: [
+          { id: 'a1', name: 'Test', customerId: '' },
         ],
       };
-      await storage.saveProjects(projects);
-      const loaded = await storage.loadProjects();
-      expect(loaded).toEqual(projects);
+      await storage.saveActivities(activities);
+      const loaded = await storage.loadActivities();
+      expect(loaded).toEqual(activities);
     });
   });
 

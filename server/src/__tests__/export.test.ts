@@ -15,9 +15,9 @@ describe('Export API', () => {
     app = createApp(TEST_DATA_DIR);
 
     const storage = new Storage(TEST_DATA_DIR);
-    await storage.saveProjects({
-      projects: [
-        { id: 'p1', name: 'Client ABC', category: 'client', tasks: [{ id: 't1', name: 'Migration' }] },
+    await storage.saveActivities({
+      activities: [
+        { id: 'p1', name: 'Client ABC', customerId: '' },
       ],
     });
     await storage.saveTimesheet({
@@ -25,12 +25,11 @@ describe('Export API', () => {
       entries: [
         {
           id: 'e1',
-          projectId: 'p1',
-          taskId: 't1',
+          activityId: 'p1',
           description: 'Worked on migration',
           segments: [
-            { start: '08:00', end: '10:15' },
-            { start: '11:00', end: '12:00' },
+            { start: '2026-02-20T08:00:00.000Z', end: '2026-02-20T10:15:00.000Z' },
+            { start: '2026-02-20T11:00:00.000Z', end: '2026-02-20T12:00:00.000Z' },
           ],
           totalMinutes: 195,
           roundedMinutes: 195,
@@ -56,6 +55,5 @@ describe('Export API', () => {
     expect(lines).toHaveLength(2); // header + 1 entry
     expect(lines[0]).toContain('Date');
     expect(lines[1]).toContain('Client ABC');
-    expect(lines[1]).toContain('Migration');
   });
 });

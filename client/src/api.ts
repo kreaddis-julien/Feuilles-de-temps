@@ -1,4 +1,4 @@
-import type { TimesheetDay, ProjectsData, Project } from './types';
+import type { TimesheetDay, ActivitiesData, CustomersData, Customer } from './types';
 
 const BASE = '/api';
 
@@ -15,7 +15,7 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 export const getTimesheet = (date: string) =>
   json<TimesheetDay>(`/timesheet/${date}`);
 
-export const createEntry = (date: string, body: { projectId: string; taskId: string; description: string }) =>
+export const createEntry = (date: string, body: { activityId: string; description: string }) =>
   json<TimesheetDay>(`/timesheet/${date}/entries`, { method: 'POST', body: JSON.stringify(body) });
 
 export const updateEntry = (date: string, id: string, body: Record<string, unknown>) =>
@@ -30,24 +30,31 @@ export const pauseEntry = (date: string, id: string) =>
 export const resumeEntry = (date: string, id: string) =>
   json<TimesheetDay>(`/timesheet/${date}/entries/${id}/resume`, { method: 'POST' });
 
-// Projects
-export const getProjects = () =>
-  json<ProjectsData>('/projects');
+// Customers
+export const getCustomers = () =>
+  json<CustomersData>('/customers');
 
-export const createProject = (body: { name: string; category: string }) =>
-  json<Project>('/projects', { method: 'POST', body: JSON.stringify(body) });
+export const createCustomer = (body: { name: string; type: string }) =>
+  json<Customer>('/customers', { method: 'POST', body: JSON.stringify(body) });
 
-export const updateProject = (id: string, body: Partial<Project>) =>
-  json<Project>(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+export const updateCustomer = (id: string, body: Record<string, unknown>) =>
+  json<Customer>(`/customers/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 
-export const deleteProject = (id: string) =>
-  fetch(`${BASE}/projects/${id}`, { method: 'DELETE' });
+export const deleteCustomer = (id: string) =>
+  fetch(`${BASE}/customers/${id}`, { method: 'DELETE' });
 
-export const addTask = (projectId: string, body: { name: string }) =>
-  json<Project>(`/projects/${projectId}/tasks`, { method: 'POST', body: JSON.stringify(body) });
+// Activities
+export const getActivities = () =>
+  json<ActivitiesData>('/activities');
 
-export const deleteTask = (projectId: string, taskId: string) =>
-  json<Project>(`/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
+export const createActivity = (body: { name: string; customerId: string }) =>
+  json<unknown>('/activities', { method: 'POST', body: JSON.stringify(body) });
+
+export const updateActivity = (id: string, body: Record<string, unknown>) =>
+  json<unknown>(`/activities/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+
+export const deleteActivity = (id: string) =>
+  fetch(`${BASE}/activities/${id}`, { method: 'DELETE' });
 
 // Export
 export const getExportUrl = (date: string) =>
@@ -55,3 +62,18 @@ export const getExportUrl = (date: string) =>
 
 export const getExportRangeUrl = (from: string, to: string) =>
   `${BASE}/export?from=${from}&to=${to}&format=csv`;
+
+// Stats
+export interface StatsData {
+  period: { from: string; to: string };
+  totalMinutes: number;
+  totalRoundedMinutes: number;
+  entryCount: number;
+  byDay: { date: string; minutes: number }[];
+  byCustomer: { id: string; name: string; type: string; minutes: number }[];
+  byActivity: { id: string; name: string; customerName: string; minutes: number }[];
+  byType: { type: string; minutes: number }[];
+}
+
+export const getStats = (from: string, to: string) =>
+  json<StatsData>(`/stats?from=${from}&to=${to}`);

@@ -1,14 +1,16 @@
 import { Router } from 'express';
 import type { Storage } from '../storage.js';
 import type { TimesheetEntry } from '../types.js';
+import { toHHmm } from '../time-utils.js';
 
 export function createExportRouter(storage: Storage) {
   const router = Router();
 
   router.get('/:date', async (req, res) => {
-    const projects = await storage.loadProjects();
+    const activities = await storage.loadActivities();
+    const customers = await storage.loadCustomers();
     const day = await storage.loadTimesheet(req.params.date);
-    const csv = buildCsv(day.entries, projects.projects, day.date);
+    const csv = buildCsv(day.entries, activities.activities, customers.customers, day.date);
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename=timesheet-${req.params.date}.csv`);
     res.send(csv);
@@ -16,17 +18,18 @@ export function createExportRouter(storage: Storage) {
 
   router.get('/', async (req, res) => {
     const { from, to } = req.query as { from: string; to: string };
-    const projects = await storage.loadProjects();
+    const activities = await storage.loadActivities();
+    const customers = await storage.loadCustomers();
     let allRows: string[] = [];
 
-    const start = new Date(from);
-    const end = new Date(to);
+    const start = new Date(from + 'T00:00:00');
+    const end = new Date(to + 'T00:00:00');
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const day = await storage.loadTimesheet(dateStr);
       if (day.entries.length > 0) {
         allRows.push(
-          ...day.entries.map((e) => entryToCsvRow(e, projects.projects, dateStr)),
+          ...day.entries.map((e) => entryToCsvRow(e, activities.activities, customers.customers, dateStr)),
         );
       }
     }
@@ -41,33 +44,38 @@ export function createExportRouter(storage: Storage) {
 }
 
 const CSV_HEADER =
-  'Date,Projet,Catégorie,Tâche,Description,Heure début,Heure fin,Durée réelle (min),Durée arrondie (min),Segments,Interruptions';
+  'Date,Client,Type,Activité,Description,Heure début,Heure fin,Durée réelle (min),Durée arrondie (min),Segments,Interruptions';
+
+interface ActivityRow { id: string; name: string; customerId: string }
+interface CustomerRow { id: string; name: string; type: string }
 
 function buildCsv(
   entries: TimesheetEntry[],
-  projects: { id: string; name: string; category: string; tasks: { id: string; name: string }[] }[],
+  activities: ActivityRow[],
+  customers: CustomerRow[],
   date: string,
 ): string {
-  const rows = entries.map((e) => entryToCsvRow(e, projects, date));
+  const rows = entries.map((e) => entryToCsvRow(e, activities, customers, date));
   return CSV_HEADER + '\n' + rows.join('\n');
 }
 
 function entryToCsvRow(
   entry: TimesheetEntry,
-  projects: { id: string; name: string; category: string; tasks: { id: string; name: string }[] }[],
+  activities: ActivityRow[],
+  customers: CustomerRow[],
   date: string,
 ): string {
-  const project = projects.find((p) => p.id === entry.projectId);
-  const task = project?.tasks.find((t) => t.id === entry.taskId);
-  const firstStart = entry.segments[0]?.start ?? '';
-  const lastEnd = entry.segments[entry.segments.length - 1]?.end ?? '';
+  const activity = activities.find((a) => a.id === entry.activityId);
+  const customer = activity ? customers.find((c) => c.id === activity.customerId) : undefined;
+  const firstStart = entry.segments[0]?.start ? toHHmm(entry.segments[0].start) : '';
+  const lastEnd = entry.segments[entry.segments.length - 1]?.end ? toHHmm(entry.segments[entry.segments.length - 1].end!) : '';
   const interruptions = Math.max(0, entry.segments.length - 1);
 
   return [
     date,
-    csvEscape(project?.name ?? entry.projectId),
-    project?.category ?? '',
-    csvEscape(task?.name ?? entry.taskId),
+    csvEscape(customer?.name ?? ''),
+    customer?.type ?? '',
+    csvEscape(activity?.name ?? entry.activityId),
     csvEscape(entry.description),
     firstStart,
     lastEnd,

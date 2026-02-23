@@ -29,10 +29,10 @@ describe('Timesheet API', () => {
   it('POST creates entry and starts timer', async () => {
     const res = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
-      .send({ projectId: 'p1', taskId: 't1', description: 'Working' });
+      .send({ activityId: 'p1',  description: 'Working' });
     expect(res.status).toBe(201);
     const entry = res.body.entries.find(
-      (e: any) => e.projectId === 'p1',
+      (e: any) => e.activityId === 'p1',
     );
     expect(entry.status).toBe('active');
     expect(entry.segments).toHaveLength(1);
@@ -43,7 +43,7 @@ describe('Timesheet API', () => {
   it('POST /pause pauses active entry', async () => {
     const create = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
-      .send({ projectId: 'p1', taskId: 't1', description: 'W' });
+      .send({ activityId: 'p1',  description: 'W' });
     const entryId = create.body.activeEntry;
     const res = await request(app)
       .post(`/api/timesheet/${DATE}/entries/${entryId}/pause`);
@@ -58,7 +58,7 @@ describe('Timesheet API', () => {
   it('POST /resume resumes paused entry', async () => {
     const create = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
-      .send({ projectId: 'p1', taskId: 't1', description: 'W' });
+      .send({ activityId: 'p1',  description: 'W' });
     const entryId = create.body.activeEntry;
     await request(app)
       .post(`/api/timesheet/${DATE}/entries/${entryId}/pause`);
@@ -76,11 +76,11 @@ describe('Timesheet API', () => {
   it('interrupt workflow: new entry pauses current', async () => {
     const a = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
-      .send({ projectId: 'p1', taskId: 't1', description: 'Task A' });
+      .send({ activityId: 'p1',  description: 'Task A' });
     const idA = a.body.activeEntry;
     const b = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
-      .send({ projectId: 'p2', taskId: 't2', description: 'Interrupt B' });
+      .send({ activityId: 'p2',  description: 'Interrupt B' });
     const idB = b.body.activeEntry;
     expect(idB).not.toBe(idA);
     const entryA = b.body.entries.find((e: any) => e.id === idA);
@@ -91,7 +91,7 @@ describe('Timesheet API', () => {
   it('PATCH updates entry description', async () => {
     const create = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
-      .send({ projectId: 'p1', taskId: 't1', description: 'Old' });
+      .send({ activityId: 'p1',  description: 'Old' });
     const entryId = create.body.activeEntry;
     const res = await request(app)
       .patch(`/api/timesheet/${DATE}/entries/${entryId}`)
@@ -103,7 +103,7 @@ describe('Timesheet API', () => {
   it('PATCH with status=completed stops timer and rounds', async () => {
     const create = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
-      .send({ projectId: 'p1', taskId: 't1', description: 'W' });
+      .send({ activityId: 'p1',  description: 'W' });
     const entryId = create.body.activeEntry;
     const res = await request(app)
       .patch(`/api/timesheet/${DATE}/entries/${entryId}`)
@@ -118,7 +118,7 @@ describe('Timesheet API', () => {
   it('DELETE removes entry', async () => {
     const create = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
-      .send({ projectId: 'p1', taskId: 't1', description: 'W' });
+      .send({ activityId: 'p1',  description: 'W' });
     const entryId = create.body.activeEntry;
     const res = await request(app)
       .delete(`/api/timesheet/${DATE}/entries/${entryId}`);

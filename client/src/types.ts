@@ -1,19 +1,23 @@
-export type Category = 'client' | 'interne' | 'support';
+export type CustomerType = 'interne' | 'externe';
 
-export interface Task {
+export interface Activity {
   id: string;
   name: string;
+  customerId: string;
 }
 
-export interface Project {
+export interface ActivitiesData {
+  activities: Activity[];
+}
+
+export interface Customer {
   id: string;
   name: string;
-  category: Category;
-  tasks: Task[];
+  type: CustomerType;
 }
 
-export interface ProjectsData {
-  projects: Project[];
+export interface CustomersData {
+  customers: Customer[];
 }
 
 export interface Segment {
@@ -25,8 +29,7 @@ export type EntryStatus = 'active' | 'paused' | 'completed';
 
 export interface TimesheetEntry {
   id: string;
-  projectId: string;
-  taskId: string;
+  activityId: string;
   description: string;
   segments: Segment[];
   totalMinutes: number;
