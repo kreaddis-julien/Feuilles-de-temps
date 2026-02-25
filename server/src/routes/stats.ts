@@ -1,5 +1,16 @@
 import { Router } from 'express';
 import type { Storage } from '../storage.js';
+import type { Segment } from '../types.js';
+import { roundUp15 } from '../time-utils.js';
+
+function liveMinutes(segments: Segment[]): number {
+  const now = Date.now();
+  return segments.reduce((sum, seg) => {
+    const start = new Date(seg.start).getTime();
+    const end = seg.end ? new Date(seg.end).getTime() : now;
+    return sum + Math.floor((end - start) / 60000);
+  }, 0);
+}
 
 export function createStatsRouter(storage: Storage) {
   const router = Router();
@@ -26,17 +37,19 @@ export function createStatsRouter(storage: Storage) {
       let dayMinutes = 0;
 
       for (const entry of day.entries) {
-        if (entry.status !== 'completed') continue;
+        const minutes = entry.status === 'completed'
+          ? entry.roundedMinutes
+          : roundUp15(liveMinutes(entry.segments));
         entryCount++;
-        totalMinutes += entry.totalMinutes;
-        totalRounded += entry.roundedMinutes;
-        dayMinutes += entry.roundedMinutes;
+        totalMinutes += entry.status === 'completed' ? entry.totalMinutes : liveMinutes(entry.segments);
+        totalRounded += minutes;
+        dayMinutes += minutes;
 
         if (entry.activityId) {
-          activityAgg[entry.activityId] = (activityAgg[entry.activityId] || 0) + entry.roundedMinutes;
+          activityAgg[entry.activityId] = (activityAgg[entry.activityId] || 0) + minutes;
           const act = activities.activities.find(a => a.id === entry.activityId);
           if (act?.customerId) {
-            customerAgg[act.customerId] = (customerAgg[act.customerId] || 0) + entry.roundedMinutes;
+            customerAgg[act.customerId] = (customerAgg[act.customerId] || 0) + minutes;
           }
         }
       }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  PieChart, Pie, Cell,
+  PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import * as api from '../api';
 import type { StatsData } from '../api';
@@ -55,6 +55,25 @@ function shortDate(dateStr: string): string {
 
 const COLORS = ['#49aeff', '#fc0036', '#29a948', '#ffae00', '#f32882', '#00ac96', '#f97ea8', '#a8a8a8'];
 
+function Top3Legend({ payload }: { payload?: Array<{ value: string; color: string; payload?: { hours?: number } }> }) {
+  if (!payload?.length) return null;
+  const sorted = [...payload].sort((a, b) => (b.payload?.hours ?? 0) - (a.payload?.hours ?? 0));
+  const items = sorted.slice(0, 3);
+  return (
+    <ul style={{ listStyle: 'none', padding: 0, margin: '0.5rem 0 0', fontSize: '0.75rem', minHeight: '5.5rem' }}>
+      {items.map((entry, i) => (
+        <li key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: entry.color, flexShrink: 0 }} />
+          <span style={{ color: entry.color }}>{entry.value}</span> : {entry.payload?.hours ?? 0}h
+        </li>
+      ))}
+      {payload.length > 3 && (
+        <li style={{ color: 'var(--color-text-muted)' }}>+{payload.length - 3} autres</li>
+      )}
+    </ul>
+  );
+}
+
 function PieTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { fill: string; totalHours?: number } }> }) {
   if (!active || !payload?.length) return null;
   const { name, value, payload: p } = payload[0];
@@ -92,7 +111,11 @@ export default function StatsPage() {
     setStats(data);
   }, [range.from, range.to]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, 30_000);
+    return () => clearInterval(id);
+  }, [refresh]);
 
   function shiftPeriod(offset: number) {
     const [y, m, d] = refDate.split('-').map(Number);
@@ -203,6 +226,7 @@ export default function StatsPage() {
                   ))}
                 </Pie>
                 <Tooltip content={<PieTooltip />} />
+                <Legend content={<Top3Legend />} />
               </PieChart>
             </ResponsiveContainer>
           </section>
@@ -228,6 +252,7 @@ export default function StatsPage() {
                   ))}
                 </Pie>
                 <Tooltip content={<PieTooltip />} />
+                <Legend content={<Top3Legend />} />
               </PieChart>
             </ResponsiveContainer>
           </section>
@@ -238,7 +263,7 @@ export default function StatsPage() {
       <div className="stats-charts-row">
         {stats.byActivity.length > 0 && (
           <section className="stats-section stats-half">
-            <h2>Par activité détaillé</h2>
+            <h2>Par activité (détaillé)</h2>
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
@@ -255,6 +280,7 @@ export default function StatsPage() {
                   ))}
                 </Pie>
                 <Tooltip content={<PieTooltip />} />
+                <Legend content={<Top3Legend />} />
               </PieChart>
             </ResponsiveContainer>
           </section>
@@ -277,6 +303,7 @@ export default function StatsPage() {
                       {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                     </Pie>
                     <Tooltip content={<PieTooltip />} />
+                    <Legend content={<Top3Legend />} />
                   </PieChart>
                 </ResponsiveContainer>
               );
