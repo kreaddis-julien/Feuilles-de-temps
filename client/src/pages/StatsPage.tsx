@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell,
 } from 'recharts';
 import * as api from '../api';
 import type { StatsData } from '../api';
@@ -55,12 +55,13 @@ function shortDate(dateStr: string): string {
 
 const COLORS = ['#49aeff', '#fc0036', '#29a948', '#ffae00', '#f32882', '#00ac96', '#f97ea8', '#a8a8a8'];
 
-function PieTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { fill: string } }> }) {
+function PieTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { fill: string; totalHours?: number } }> }) {
   if (!active || !payload?.length) return null;
   const { name, value, payload: p } = payload[0];
+  const pct = p.totalHours ? Math.round(value / p.totalHours * 100) : 0;
   return (
     <div className="chart-tooltip">
-      <span style={{ color: p.fill }}>{name}</span> : {value}h
+      <span style={{ color: p.fill }}>{name}</span> : {value}h ({pct}%)
     </div>
   );
 }
@@ -189,7 +190,7 @@ export default function StatsPage() {
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
-                  data={stats.byCustomer.map(c => ({ ...c, hours: +(c.minutes / 60).toFixed(1) }))}
+                  data={stats.byCustomer.map(c => ({ ...c, hours: +(c.minutes / 60).toFixed(1), totalHours: +(stats.totalRoundedMinutes / 60).toFixed(1) }))}
                   dataKey="hours"
                   nameKey="name"
                   cx="50%"
@@ -202,10 +203,6 @@ export default function StatsPage() {
                   ))}
                 </Pie>
                 <Tooltip content={<PieTooltip />} />
-                <Legend formatter={(value) => {
-                  const c = stats.byCustomer.find(cu => cu.name === value);
-                  return c ? `${value} (${(c.minutes / 60).toFixed(1)}h)` : value;
-                }} />
               </PieChart>
             </ResponsiveContainer>
           </section>
@@ -218,7 +215,7 @@ export default function StatsPage() {
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
-                  data={stats.byType.map(t => ({ ...t, label: t.type.charAt(0).toUpperCase() + t.type.slice(1), hours: +(t.minutes / 60).toFixed(1) }))}
+                  data={stats.byType.map(t => ({ ...t, label: t.type.charAt(0).toUpperCase() + t.type.slice(1), hours: +(t.minutes / 60).toFixed(1), totalHours: +(stats.totalRoundedMinutes / 60).toFixed(1) }))}
                   dataKey="hours"
                   nameKey="label"
                   cx="50%"
@@ -231,42 +228,63 @@ export default function StatsPage() {
                   ))}
                 </Pie>
                 <Tooltip content={<PieTooltip />} />
-                <Legend formatter={(value) => {
-                  const t = stats.byType.find(ty => ty.type.charAt(0).toUpperCase() + ty.type.slice(1) === value);
-                  return t ? `${value} (${(t.minutes / 60).toFixed(1)}h)` : value;
-                }} />
               </PieChart>
             </ResponsiveContainer>
           </section>
         )}
       </div>
 
-      {/* By activity table */}
-      {stats.byActivity.length > 0 && (
-        <section className="stats-section">
-          <h2>Par activité</h2>
-          <table className="completed-table">
-            <thead>
-              <tr>
-                <th>Activité</th>
-                <th>Client</th>
-                <th>Durée</th>
-                <th>%</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stats.byActivity.map(p => (
-                <tr key={p.id}>
-                  <td>{p.name}</td>
-                  <td>{p.customerName || '—'}</td>
-                  <td>{formatH(p.minutes)}</td>
-                  <td>{stats.totalRoundedMinutes > 0 ? Math.round(p.minutes / stats.totalRoundedMinutes * 100) : 0}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
+      {/* By activity charts row */}
+      <div className="stats-charts-row">
+        {stats.byActivity.length > 0 && (
+          <section className="stats-section stats-half">
+            <h2>Par activité détaillé</h2>
+            <ResponsiveContainer width="100%" height={280}>
+              <PieChart>
+                <Pie
+                  data={stats.byActivity.map(a => ({ ...a, label: a.customerName ? `${a.name} — ${a.customerName}` : a.name, hours: +(a.minutes / 60).toFixed(1), totalHours: +(stats.totalRoundedMinutes / 60).toFixed(1) }))}
+                  dataKey="hours"
+                  nameKey="label"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={90}
+                  stroke="none"
+                >
+                  {stats.byActivity.map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip content={<PieTooltip />} />
+              </PieChart>
+            </ResponsiveContainer>
+          </section>
+        )}
+
+        {stats.byActivity.length > 0 && (
+          <section className="stats-section stats-half">
+            <h2>Par activité</h2>
+            {(() => {
+              const grouped = stats.byActivity.reduce<Record<string, number>>((acc, a) => {
+                acc[a.name] = (acc[a.name] || 0) + a.minutes;
+                return acc;
+              }, {});
+              const totalHours = +(stats.totalRoundedMinutes / 60).toFixed(1);
+              const data = Object.entries(grouped).map(([name, minutes]) => ({ name, hours: +(minutes / 60).toFixed(1), totalHours }));
+              return (
+                <ResponsiveContainer width="100%" height={280}>
+                  <PieChart>
+                    <Pie data={data} dataKey="hours" nameKey="name" cx="50%" cy="50%" outerRadius={90} stroke="none">
+                      {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip content={<PieTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+              );
+            })()}
+          </section>
+        )}
+      </div>
+
 
       {stats.byDay.length === 0 && (
         <p style={{ color: 'var(--color-text-muted)', textAlign: 'center', marginTop: '2rem' }}>
