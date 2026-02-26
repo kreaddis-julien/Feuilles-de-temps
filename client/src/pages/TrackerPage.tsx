@@ -42,6 +42,12 @@ function activityOptionLabel(activity: { name: string; customerId: string }, cus
   return customer ? `${activity.name} (${customer.name})` : activity.name;
 }
 
+function resolveCustomerName(activityId: string, activitiesList: { id: string; customerId: string }[], customersList: { id: string; name: string }[]): string {
+  const activity = activitiesList.find(a => a.id === activityId);
+  if (!activity) return '';
+  return customersList.find(c => c.id === activity.customerId)?.name ?? '';
+}
+
 function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -317,6 +323,7 @@ export default function TrackerPage() {
           <table className="completed-table">
             <thead>
               <tr>
+                <th>Client</th>
                 <th>Activité</th>
                 <th>Description</th>
                 <th>Durée</th>
@@ -326,6 +333,7 @@ export default function TrackerPage() {
             <tbody>
               {completedEntries.map(entry => (
                 <tr key={entry.id}>
+                  <td>{resolveCustomerName(entry.activityId, activities.activities, customers.customers) || '—'}</td>
                   <td>
                     <span className="editable" onClick={() => openEditModal(entry)}>
                       {entryLabel(entry, activities.activities) || '—'}
