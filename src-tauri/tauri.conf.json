@@ -6,8 +6,8 @@
   "build": {
     "devUrl": "http://localhost:5173",
     "frontendDist": "../client/dist",
-    "beforeDevCommand": "cd ../client && bun run dev",
-    "beforeBuildCommand": "cd ../client && bun run build"
+    "beforeDevCommand": "bun run build:server && mkdir -p src-tauri/target/debug/binaries && cp src-tauri/binaries/timesheet-server-aarch64-apple-darwin src-tauri/target/debug/binaries/timesheet-server && cd client && bun run dev",
+    "beforeBuildCommand": "cd client && bun run build"
   },
   "app": {
     "windows": [
