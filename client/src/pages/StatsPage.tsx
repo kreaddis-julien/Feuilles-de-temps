@@ -265,7 +265,7 @@ export default function StatsPage() {
                 contentStyle={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 6 }}
                 labelStyle={{ color: theme.foreground }}
                 cursor={{ fill: theme.border, opacity: 0.3 }}
-                formatter={(value: number) => [`${value}h`, 'Heures']}
+                formatter={(value: number | undefined) => [`${value ?? 0}h`, 'Heures']}
               />
               <Bar dataKey="hours" fill={theme.primary} radius={[4, 4, 0, 0]} />
             </BarChart>

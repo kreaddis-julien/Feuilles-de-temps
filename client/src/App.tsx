@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
+import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
-import { Download, Moon, Sun } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Download, Moon, Sun, QrCode } from 'lucide-react';
 import TrackerPage from './pages/TrackerPage';
 import ActivitiesPage from './pages/ActivitiesPage';
 import CustomersPage from './pages/CustomersPage';
@@ -19,17 +21,36 @@ function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
+
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [mobileUrl, setMobileUrl] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  function handleExport() {
+  useEffect(() => {
+    if (!qrOpen || mobileUrl) return;
+    fetch(`${api.BASE}/network`)
+      .then(r => r.json())
+      .then(({ ip, port }) => { if (ip) setMobileUrl(`http://${ip}:${port}`); })
+      .catch(() => {});
+  }, [qrOpen, mobileUrl]);
+
+  async function handleExport() {
     const date = localStorage.getItem('trackerDate') || todayStr();
-    window.open(api.getExportUrl(date), '_blank');
+    const url = api.getExportUrl(date);
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `timesheet-${date}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   return (
@@ -84,6 +105,11 @@ export default function App() {
           Clients
         </NavLink>
         <div className="ml-auto flex items-center gap-1.5">
+          {isTauri && (
+            <Button variant="outline" size="icon" onClick={() => setQrOpen(true)} title="Accès mobile">
+              <QrCode className="h-4 w-4" />
+            </Button>
+          )}
           <Button variant="outline" size="icon" onClick={handleExport} title="Exporter CSV">
             <Download className="h-4 w-4" />
           </Button>
@@ -105,6 +131,23 @@ export default function App() {
           <Route path="/stats" element={<StatsPage />} />
         </Routes>
       </main>
+      <Dialog open={qrOpen} onOpenChange={setQrOpen}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Accès mobile</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-4 py-4">
+            {mobileUrl ? (
+              <>
+                <QRCodeSVG value={mobileUrl} size={200} />
+                <p className="text-sm text-muted-foreground text-center font-mono">{mobileUrl}</p>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Recherche du réseau...</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </BrowserRouter>
   );
 }

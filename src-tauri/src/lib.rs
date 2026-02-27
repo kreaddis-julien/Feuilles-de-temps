@@ -23,12 +23,20 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir).expect("failed to create data dir");
             let data_dir_str = data_dir.to_string_lossy().to_string();
 
+            // Resolve static dir for mobile access
+            let static_dir = app
+                .path()
+                .resource_dir()
+                .expect("failed to resolve resource dir")
+                .join("webroot");
+            let static_dir_str = static_dir.to_string_lossy().to_string();
+
             // Spawn the sidecar server
             let (mut rx, child) = app
                 .shell()
-                .sidecar("binaries/timesheet-server")
+                .sidecar("timesheet-server")
                 .expect("failed to create sidecar command")
-                .args(["--data-dir", &data_dir_str])
+                .args(["--data-dir", &data_dir_str, "--static-dir", &static_dir_str])
                 .spawn()
                 .expect("failed to spawn sidecar");
 

@@ -12,10 +12,14 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "binaries/timesheet-server",
+          "name": "timesheet-server",
           "sidecar": true,
           "args": [
             "--data-dir",
+            {
+              "validator": "\\S+"
+            },
+            "--static-dir",
             {
               "validator": "\\S+"
             }
@@ -27,10 +31,14 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
-          "name": "binaries/timesheet-server",
+          "name": "timesheet-server",
           "sidecar": true,
           "args": [
             "--data-dir",
+            {
+              "validator": "\\S+"
+            },
+            "--static-dir",
             {
               "validator": "\\S+"
             }

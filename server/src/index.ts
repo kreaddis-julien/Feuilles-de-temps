@@ -1,11 +1,14 @@
 import path from 'path';
 import { createApp } from './app.js';
 
-const dataDirIndex = process.argv.indexOf('--data-dir');
-const DATA_DIR = (dataDirIndex !== -1 && process.argv[dataDirIndex + 1])
-  ? process.argv[dataDirIndex + 1]
-  : path.join(import.meta.dirname, '../../data');
-const app = createApp(DATA_DIR);
+function getArg(name: string): string | undefined {
+  const i = process.argv.indexOf(name);
+  return i !== -1 ? process.argv[i + 1] : undefined;
+}
+
+const DATA_DIR = getArg('--data-dir') ?? path.join(import.meta.dirname, '../../data');
+const STATIC_DIR = getArg('--static-dir');
+const app = createApp(DATA_DIR, { staticDir: STATIC_DIR });
 
 const PORT = 3001;
 app.listen(PORT, '0.0.0.0', () => {

@@ -1,7 +1,7 @@
 import type { TimesheetDay, ActivitiesData, CustomersData, Customer } from './types';
 
-const isTauri = typeof window !== 'undefined' && '__TAURI__' in window;
-const BASE = isTauri ? 'http://localhost:3001/api' : '/api';
+const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
+export const BASE = isTauri ? 'http://localhost:3001/api' : '/api';
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
