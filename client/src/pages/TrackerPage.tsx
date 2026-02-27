@@ -1,6 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData } from '../types';
 import * as api from '../api';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
+} from '@/components/ui/table';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog';
+import { ChevronLeft, ChevronRight, Play, Pause, Square, Trash2, RotateCcw } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -25,7 +37,6 @@ function resolveActivityName(activityId: string, activities: { id: string; name:
   return activities.find(a => a.id === activityId)?.name ?? '';
 }
 
-/** Human-readable label for an entry: activity name or start time fallback. */
 function entryLabel(entry: TimesheetEntry, activities: { id: string; name: string }[]): string {
   const name = resolveActivityName(entry.activityId, activities);
   if (name) return name;
@@ -53,7 +64,6 @@ function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Parse an ISO timestamp (or legacy HH:mm) into a Date. */
 function parseTimestamp(value: string): Date {
   if (value.includes('T')) return new Date(value);
   const [h, m] = value.split(':').map(Number);
@@ -67,22 +77,16 @@ function parseTimestamp(value: string): Date {
 // ---------------------------------------------------------------------------
 
 export default function TrackerPage() {
-  // ---- State ----------------------------------------------------------------
   const [currentDate, setCurrentDate] = useState(todayStr);
   const [day, setDay] = useState<TimesheetDay | null>(null);
   const [activities, setActivities] = useState<ActivitiesData>({ activities: [] });
   const [customers, setCustomers] = useState<CustomersData>({ customers: [] });
-
-  // Live timer
   const [elapsed, setElapsed] = useState(0);
-
-  // Edit modal
   const [editingEntry, setEditingEntry] = useState<TimesheetEntry | null>(null);
   const [editActivityId, setEditActivityId] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editMinutes, setEditMinutes] = useState('');
 
-  // ---- Data loading ---------------------------------------------------------
   const refresh = useCallback(async () => {
     const [t, a, c] = await Promise.all([
       api.getTimesheet(currentDate),
@@ -94,15 +98,9 @@ export default function TrackerPage() {
     setCustomers(c);
   }, [currentDate]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { localStorage.setItem('trackerDate', currentDate); }, [currentDate]);
 
-  useEffect(() => {
-    localStorage.setItem('trackerDate', currentDate);
-  }, [currentDate]);
-
-  // ---- Date navigation ------------------------------------------------------
   function shiftDate(offset: number) {
     const [y, m, d] = currentDate.split('-').map(Number);
     const date = new Date(y, m - 1, d + offset);
@@ -111,17 +109,11 @@ export default function TrackerPage() {
     );
   }
 
-  // ---- Active entry helpers ------------------------------------------------
   const activeEntry: TimesheetEntry | undefined =
     day?.entries.find(e => e.id === day.activeEntry);
 
-  // Live timer effect
   useEffect(() => {
-    if (!activeEntry) {
-      setElapsed(0);
-      return;
-    }
-
+    if (!activeEntry) { setElapsed(0); return; }
     function computeElapsed() {
       if (!activeEntry) return 0;
       let totalSec = 0;
@@ -135,32 +127,24 @@ export default function TrackerPage() {
       }
       return totalSec;
     }
-
     setElapsed(computeElapsed());
-    const id = setInterval(() => {
-      setElapsed(computeElapsed());
-    }, 1000);
+    const id = setInterval(() => setElapsed(computeElapsed()), 1000);
     return () => clearInterval(id);
   }, [activeEntry]);
 
-  // ---- Paused entries -------------------------------------------------------
   const pausedEntries: TimesheetEntry[] =
     day?.pausedEntries
       .map(id => day.entries.find(e => e.id === id))
       .filter((e): e is TimesheetEntry => !!e) ?? [];
 
-  // ---- Completed entries ----------------------------------------------------
   const completedEntries: TimesheetEntry[] =
     day?.entries.filter(e => e.status === 'completed') ?? [];
 
-  // ---- Progress bar ---------------------------------------------------------
   const completedMinutes = completedEntries.reduce((s, e) => s + e.roundedMinutes, 0);
   const activeMinutes = activeEntry ? Math.round(elapsed / 60) : 0;
   const totalMinutes = completedMinutes + activeMinutes;
   const TARGET = 420;
   const progressPct = Math.min(100, (totalMinutes / TARGET) * 100);
-
-  // ---- Handlers -------------------------------------------------------------
 
   async function handlePause() {
     if (!day || !activeEntry) return;
@@ -185,14 +169,10 @@ export default function TrackerPage() {
   }
 
   async function handleQuickStart() {
-    await api.createEntry(currentDate, {
-      activityId: '',
-      description: '',
-    });
+    await api.createEntry(currentDate, { activityId: '', description: '' });
     await refresh();
   }
 
-  // Edit modal helpers
   function openEditModal(entry: TimesheetEntry) {
     setEditingEntry(entry);
     setEditActivityId(entry.activityId);
@@ -214,39 +194,39 @@ export default function TrackerPage() {
     setEditingEntry(null);
   }
 
-  // ---- Render ---------------------------------------------------------------
-
-  if (!day) return <div>Chargement...</div>;
+  if (!day) return <div className="text-center text-muted-foreground py-12">Chargement...</div>;
 
   return (
-    <div className="tracker-page">
+    <div className="space-y-6 animate-in fade-in duration-200">
       {/* ===== Date Navigation ===== */}
-      <div className="date-nav">
-        <button onClick={() => shiftDate(-1)}>&larr;</button>
-        <span className="current-date">{currentDate}</span>
-        <button onClick={() => shiftDate(1)}>&rarr;</button>
+      <div className="flex items-center justify-center gap-4">
+        <Button variant="outline" size="icon" onClick={() => shiftDate(-1)}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="text-base font-semibold tabular-nums min-w-[8em] text-center">
+          {currentDate}
+        </span>
+        <Button variant="outline" size="icon" onClick={() => shiftDate(1)}>
+          <ChevronRight className="h-4 w-4" />
+        </Button>
       </div>
 
       {/* ===== Progress Bar ===== */}
-      <div className="progress-section">
-        <div className="progress-bar-track">
-          <div
-            className="progress-bar-fill"
-            style={{ width: `${progressPct}%` }}
-          />
-        </div>
-        <div className="progress-text">
+      <div>
+        <Progress value={progressPct} />
+        <p className="text-center mt-1.5 text-sm font-medium tabular-nums text-muted-foreground">
           {formatDuration(totalMinutes)} / {formatDuration(TARGET)}
-        </div>
+        </p>
       </div>
 
       {/* ===== Active Task ===== */}
       {activeEntry && (
-        <section className="active-section">
-          <h2>En cours</h2>
-          <div className="active-card">
-            <div className="active-info">
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">En cours</h2>
+          <Card className="border-primary bg-primary/5 gap-4 py-5">
+            <CardContent className="space-y-3">
               <select
+                className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
                 value={activeEntry.activityId}
                 onChange={async (e) => {
                   await api.updateEntry(currentDate, activeEntry.id, { activityId: e.target.value });
@@ -258,9 +238,7 @@ export default function TrackerPage() {
                   <option key={a.id} value={a.id}>{activityOptionLabel(a, customers.customers)}</option>
                 ))}
               </select>
-              <input
-                type="text"
-                className="active-desc-input"
+              <Input
                 placeholder="Description..."
                 value={activeEntry.description}
                 onChange={async (e) => {
@@ -278,100 +256,139 @@ export default function TrackerPage() {
                   await api.updateEntry(currentDate, activeEntry.id, { description: e.target.value });
                 }}
               />
-            </div>
-            <div className="timer">{formatTimer(elapsed)}</div>
-            <div className="active-actions">
-              <button onClick={handlePause}>Pause</button>
-              <button onClick={handleFinish}>Terminer</button>
-              <button className="btn-danger" onClick={() => handleDeleteEntry(activeEntry.id)}>Annuler</button>
-            </div>
-          </div>
+              <div className="font-mono text-4xl font-semibold text-primary text-center tabular-nums tracking-wide py-1">
+                {formatTimer(elapsed)}
+              </div>
+              <div className="flex gap-2 justify-center">
+                <Button variant="outline" onClick={handlePause}>
+                  <Pause className="h-4 w-4" />
+                  Pause
+                </Button>
+                <Button onClick={handleFinish}>
+                  <Square className="h-4 w-4" />
+                  Terminer
+                </Button>
+                <Button variant="destructive" onClick={() => handleDeleteEntry(activeEntry.id)}>
+                  <Trash2 className="h-4 w-4" />
+                  Annuler
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </section>
       )}
 
       {/* ===== Paused Tasks ===== */}
       {pausedEntries.length > 0 && (
-        <section className="paused-section">
-          <h2>En pause</h2>
-          {pausedEntries.map(entry => (
-            <div key={entry.id} className="paused-card">
-              <span>
-                <strong>{entryLabel(entry, activities.activities)}</strong>
-                {' '}
-                ({formatDuration(entry.totalMinutes)})
-              </span>
-              <div style={{ display: 'flex', gap: '0.375rem' }}>
-                <button onClick={() => handleResume(entry.id)}>Reprendre</button>
-                <button className="btn-danger" onClick={() => handleDeleteEntry(entry.id)}>Annuler</button>
-              </div>
-            </div>
-          ))}
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">En pause</h2>
+          <div className="space-y-2">
+            {pausedEntries.map(entry => (
+              <Card key={entry.id} className="border-warning bg-warning/5 py-3 gap-0">
+                <CardContent className="flex items-center justify-between">
+                  <span className="text-sm">
+                    <strong className="font-semibold">{entryLabel(entry, activities.activities)}</strong>
+                    {' '}({formatDuration(entry.totalMinutes)})
+                  </span>
+                  <div className="flex gap-1.5">
+                    <Button variant="outline" size="sm" onClick={() => handleResume(entry.id)}>
+                      <Play className="h-3.5 w-3.5" />
+                      Reprendre
+                    </Button>
+                    <Button variant="destructive" size="sm" onClick={() => handleDeleteEntry(entry.id)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Annuler
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </section>
       )}
 
-      {/* ===== New Entry ===== */}
-      <section className="quick-start-section">
-        <button className="quick-start-btn" onClick={handleQuickStart}>
+      {/* ===== Quick Start ===== */}
+      <div className="text-center">
+        <Button size="lg" onClick={handleQuickStart} className="text-base font-semibold px-8">
+          <Play className="h-5 w-5" />
           Lancer une nouvelle feuille de temps
-        </button>
-      </section>
+        </Button>
+      </div>
 
       {/* ===== Completed Entries ===== */}
       {completedEntries.length > 0 && (
-        <section className="completed-section">
-          <h2>Terminées</h2>
-          <table className="completed-table">
-            <thead>
-              <tr>
-                <th>Client</th>
-                <th>Activité</th>
-                <th>Description</th>
-                <th>Durée</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">Terminées</h2>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Client</TableHead>
+                <TableHead>Activité</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Durée</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {completedEntries.map(entry => (
-                <tr key={entry.id}>
-                  <td>{resolveCustomerName(entry.activityId, activities.activities, customers.customers) || '—'}</td>
-                  <td>
-                    <span className="editable" onClick={() => openEditModal(entry)}>
+                <TableRow key={entry.id}>
+                  <TableCell>
+                    {resolveCustomerName(entry.activityId, activities.activities, customers.customers) || '—'}
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className="cursor-pointer border-b border-dashed border-border hover:bg-accent px-1 py-0.5 rounded-sm transition-colors"
+                      onClick={() => openEditModal(entry)}
+                    >
                       {entryLabel(entry, activities.activities) || '—'}
                     </span>
-                  </td>
-                  <td>
-                    <span className="editable" onClick={() => openEditModal(entry)}>
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className="cursor-pointer border-b border-dashed border-border hover:bg-accent px-1 py-0.5 rounded-sm transition-colors"
+                      onClick={() => openEditModal(entry)}
+                    >
                       {entry.description || '—'}
                     </span>
-                  </td>
-                  <td>
-                    <span className="editable" onClick={() => openEditModal(entry)}>
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className="cursor-pointer border-b border-dashed border-border hover:bg-accent px-1 py-0.5 rounded-sm transition-colors"
+                      onClick={() => openEditModal(entry)}
+                    >
                       {formatDuration(entry.roundedMinutes)}
                     </span>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '0.375rem' }}>
-                      <button onClick={() => handleResume(entry.id)}>Relancer</button>
-                      <button onClick={() => handleDeleteEntry(entry.id)} className="btn-danger">
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex gap-1.5">
+                      <Button variant="outline" size="xs" onClick={() => handleResume(entry.id)}>
+                        <RotateCcw className="h-3 w-3" />
+                        Relancer
+                      </Button>
+                      <Button variant="destructive" size="xs" onClick={() => handleDeleteEntry(entry.id)}>
+                        <Trash2 className="h-3 w-3" />
                         Supprimer
-                      </button>
+                      </Button>
                     </div>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </section>
       )}
 
       {/* ===== Edit Modal ===== */}
-      {editingEntry && (
-        <div className="modal-overlay" onClick={() => setEditingEntry(null)}>
-          <div className="modal-panel" onClick={e => e.stopPropagation()}>
-            <h2>Modifier l'entrée</h2>
-            <div className="modal-field">
-              <label>Activité</label>
+      <Dialog open={!!editingEntry} onOpenChange={(open) => { if (!open) setEditingEntry(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Modifier l'entrée</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-muted-foreground">Activité</label>
               <select
+                className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
                 value={editActivityId}
                 onChange={e => setEditActivityId(e.target.value)}
               >
@@ -381,30 +398,29 @@ export default function TrackerPage() {
                 ))}
               </select>
             </div>
-            <div className="modal-field">
-              <label>Description</label>
-              <textarea
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-muted-foreground">Description</label>
+              <Textarea
                 value={editDescription}
                 onChange={e => setEditDescription(e.target.value)}
                 rows={4}
               />
             </div>
-            <div className="modal-field">
-              <label>Durée (minutes)</label>
-              <input
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-muted-foreground">Durée (minutes)</label>
+              <Input
                 type="number"
                 value={editMinutes}
                 onChange={e => setEditMinutes(e.target.value)}
               />
             </div>
-            <div className="modal-actions">
-              <button onClick={() => setEditingEntry(null)}>Annuler</button>
-              <button className="btn-primary" onClick={saveEditModal}>Enregistrer</button>
-            </div>
           </div>
-        </div>
-      )}
-
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingEntry(null)}>Annuler</Button>
+            <Button onClick={saveEditModal}>Enregistrer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import * as api from '../api';
 import type { StatsData } from '../api';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -19,7 +22,7 @@ function startOfWeek(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
   const date = new Date(y, m - 1, d);
   const day = date.getDay();
-  const diff = day === 0 ? 6 : day - 1; // Monday = start
+  const diff = day === 0 ? 6 : day - 1;
   date.setDate(date.getDate() - diff);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -55,20 +58,43 @@ function shortDate(dateStr: string): string {
 
 const COLORS = ['#49aeff', '#fc0036', '#29a948', '#ffae00', '#f32882', '#00ac96', '#f97ea8', '#a8a8a8'];
 
+/** Resolve a CSS custom property to its computed value. */
+function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/** Hook that returns resolved chart theme colors, updating on dark/light switch. */
+function useChartTheme() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setTick(t => t + 1));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+  return useMemo(() => ({
+    primary: cssVar('--primary'),
+    foreground: cssVar('--foreground'),
+    mutedForeground: cssVar('--muted-foreground'),
+    card: cssVar('--card'),
+    border: cssVar('--border'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [tick]);
+}
+
 function Top3Legend({ payload }: { payload?: Array<{ value: string; color: string; payload?: { hours?: number } }> }) {
   if (!payload?.length) return null;
   const sorted = [...payload].sort((a, b) => (b.payload?.hours ?? 0) - (a.payload?.hours ?? 0));
   const items = sorted.slice(0, 3);
   return (
-    <ul style={{ listStyle: 'none', padding: 0, margin: '0.5rem 0 0', fontSize: '0.75rem', minHeight: '5.5rem' }}>
+    <ul className="list-none p-0 mt-2 text-xs min-h-[5.5rem] space-y-1">
       {items.map((entry, i) => (
-        <li key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--color-text-muted)', marginBottom: '0.25rem' }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: entry.color, flexShrink: 0 }} />
+        <li key={i} className="flex items-center gap-1.5 text-muted-foreground">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: entry.color }} />
           <span style={{ color: entry.color }}>{entry.value}</span> : {entry.payload?.hours ?? 0}h
         </li>
       ))}
       {payload.length > 3 && (
-        <li style={{ color: 'var(--color-text-muted)' }}>+{payload.length - 3} autres</li>
+        <li className="text-muted-foreground">+{payload.length - 3} autres</li>
       )}
     </ul>
   );
@@ -79,7 +105,7 @@ function PieTooltip({ active, payload }: { active?: boolean; payload?: Array<{ n
   const { name, value, payload: p } = payload[0];
   const pct = p.totalHours ? Math.round(value / p.totalHours * 100) : 0;
   return (
-    <div className="chart-tooltip">
+    <div className="bg-card border border-border rounded-md px-3 py-2 text-sm text-foreground shadow-md">
       <span style={{ color: p.fill }}>{name}</span> : {value}h ({pct}%)
     </div>
   );
@@ -90,6 +116,13 @@ function PieTooltip({ active, payload }: { active?: boolean; payload?: Array<{ n
 // ---------------------------------------------------------------------------
 
 type Period = 'day' | 'week' | 'month' | 'custom';
+
+const periodButtons: { key: Period; label: string }[] = [
+  { key: 'day', label: 'Jour' },
+  { key: 'week', label: 'Semaine' },
+  { key: 'month', label: 'Mois' },
+  { key: 'custom', label: 'Personnalisé' },
+];
 
 export default function StatsPage() {
   const [period, setPeriod] = useState<Period>('week');
@@ -139,85 +172,119 @@ export default function StatsPage() {
         ? `${shortDate(range.from)} — ${shortDate(range.to)}`
         : `${range.from.slice(0, 7)}`;
 
-  if (!stats) return <div>Chargement...</div>;
+  const theme = useChartTheme();
+
+  if (!stats) return <div className="text-center text-muted-foreground py-12">Chargement...</div>;
 
   const dayData = stats.byDay.map(d => ({ ...d, label: shortDate(d.date), hours: +(d.minutes / 60).toFixed(1) }));
 
   return (
-    <div className="stats-page">
+    <div className="space-y-6 animate-in fade-in duration-200">
       {/* Period navigation */}
-      <div className="stats-nav">
-        <div className="stats-period-toggle">
-          <button className={period === 'day' ? 'active' : ''} onClick={() => setPeriod('day')}>Jour</button>
-          <button className={period === 'week' ? 'active' : ''} onClick={() => setPeriod('week')}>Semaine</button>
-          <button className={period === 'month' ? 'active' : ''} onClick={() => setPeriod('month')}>Mois</button>
-          <button className={period === 'custom' ? 'active' : ''} onClick={() => setPeriod('custom')}>Personnalisé</button>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="inline-flex rounded-md border border-border overflow-hidden">
+          {periodButtons.map(({ key, label }) => (
+            <button
+              key={key}
+              className={`px-4 py-1.5 text-sm border-none cursor-pointer transition-colors ${
+                period === key
+                  ? 'bg-primary text-primary-foreground font-medium'
+                  : 'bg-card text-muted-foreground hover:bg-accent'
+              }`}
+              onClick={() => setPeriod(key)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         {period === 'custom' ? (
-          <div className="stats-custom-range">
-            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
-            <span>—</span>
-            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} />
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              className="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+              value={customFrom}
+              onChange={e => setCustomFrom(e.target.value)}
+            />
+            <span className="text-muted-foreground">—</span>
+            <input
+              type="date"
+              className="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+              value={customTo}
+              onChange={e => setCustomTo(e.target.value)}
+            />
           </div>
         ) : (
-          <div className="date-nav">
-            <button onClick={() => shiftPeriod(-1)}>&larr;</button>
-            <span className="current-date">{periodLabel}</span>
-            <button onClick={() => shiftPeriod(1)}>&rarr;</button>
+          <div className="flex items-center gap-4">
+            <Button variant="outline" size="icon" onClick={() => shiftPeriod(-1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-base font-semibold tabular-nums min-w-[8em] text-center">
+              {periodLabel}
+            </span>
+            <Button variant="outline" size="icon" onClick={() => shiftPeriod(1)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
           </div>
         )}
       </div>
 
       {/* Summary cards */}
-      <div className="stats-summary">
-        <div className="stat-card">
-          <div className="stat-value">{formatH(stats.totalRoundedMinutes)}</div>
-          <div className="stat-label">Total</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value">{stats.entryCount}</div>
-          <div className="stat-label">Entrées</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value">{stats.byDay.length > 0 ? formatH(Math.round(stats.totalRoundedMinutes / stats.byDay.length)) : '0h'}</div>
-          <div className="stat-label">Moy / jour</div>
-        </div>
+      <div className="grid grid-cols-3 gap-4 sm:gap-4">
+        <Card className="py-4 gap-0">
+          <CardContent className="text-center">
+            <div className="text-2xl font-bold text-primary tabular-nums">{formatH(stats.totalRoundedMinutes)}</div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wide mt-1">Total</div>
+          </CardContent>
+        </Card>
+        <Card className="py-4 gap-0">
+          <CardContent className="text-center">
+            <div className="text-2xl font-bold text-primary tabular-nums">{stats.entryCount}</div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wide mt-1">Entrées</div>
+          </CardContent>
+        </Card>
+        <Card className="py-4 gap-0">
+          <CardContent className="text-center">
+            <div className="text-2xl font-bold text-primary tabular-nums">
+              {stats.byDay.length > 0 ? formatH(Math.round(stats.totalRoundedMinutes / stats.byDay.length)) : '0h'}
+            </div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wide mt-1">Moy / jour</div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Daily bar chart */}
       {dayData.length > 0 && (
-        <section className="stats-section">
-          <h2>Heures par jour</h2>
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">Heures par jour</h2>
           <ResponsiveContainer width="100%" height={250}>
             <BarChart data={dayData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="label" tick={{ fill: 'var(--color-text-muted)', fontSize: 12 }} />
-              <YAxis tick={{ fill: 'var(--color-text-muted)', fontSize: 12 }} unit="h" />
+              <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
+              <XAxis dataKey="label" tick={{ fill: theme.mutedForeground, fontSize: 12 }} />
+              <YAxis tick={{ fill: theme.mutedForeground, fontSize: 12 }} unit="h" />
               <Tooltip
-                contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 6 }}
-                labelStyle={{ color: 'var(--color-text)' }}
-                cursor={{ fill: 'var(--color-border)', opacity: 0.3 }}
+                contentStyle={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: 6 }}
+                labelStyle={{ color: theme.foreground }}
+                cursor={{ fill: theme.border, opacity: 0.3 }}
                 formatter={(value: number) => [`${value}h`, 'Heures']}
               />
-              <Bar dataKey="hours" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="hours" fill={theme.primary} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </section>
       )}
 
-      {/* By customer pie */}
-      <div className="stats-charts-row">
+      {/* By customer & type pies */}
+      <div className="flex gap-4 lg:gap-6 max-sm:flex-col">
         {stats.byCustomer.length > 0 && (
-          <section className="stats-section stats-half">
-            <h2>Par client</h2>
+          <section className="flex-1 min-w-0 space-y-3">
+            <h2 className="text-lg font-semibold">Par client</h2>
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
                   data={stats.byCustomer.map(c => ({ ...c, hours: +(c.minutes / 60).toFixed(1), totalHours: +(stats.totalRoundedMinutes / 60).toFixed(1) }))}
                   dataKey="hours"
                   nameKey="name"
-                  cx="50%"
-                  cy="50%"
+                  cx="50%" cy="50%"
                   outerRadius={90}
                   stroke="none"
                 >
@@ -232,18 +299,16 @@ export default function StatsPage() {
           </section>
         )}
 
-        {/* By type pie */}
         {stats.byType.length > 0 && (
-          <section className="stats-section stats-half">
-            <h2>Interne / Externe</h2>
+          <section className="flex-1 min-w-0 space-y-3">
+            <h2 className="text-lg font-semibold">Interne / Externe</h2>
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
                   data={stats.byType.map(t => ({ ...t, label: t.type.charAt(0).toUpperCase() + t.type.slice(1), hours: +(t.minutes / 60).toFixed(1), totalHours: +(stats.totalRoundedMinutes / 60).toFixed(1) }))}
                   dataKey="hours"
                   nameKey="label"
-                  cx="50%"
-                  cy="50%"
+                  cx="50%" cy="50%"
                   outerRadius={90}
                   stroke="none"
                 >
@@ -260,18 +325,17 @@ export default function StatsPage() {
       </div>
 
       {/* By activity charts row */}
-      <div className="stats-charts-row">
+      <div className="flex gap-4 lg:gap-6 max-sm:flex-col">
         {stats.byActivity.length > 0 && (
-          <section className="stats-section stats-half">
-            <h2>Par activité (détaillé)</h2>
+          <section className="flex-1 min-w-0 space-y-3">
+            <h2 className="text-lg font-semibold">Par activité (détaillé)</h2>
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
                   data={stats.byActivity.map(a => ({ ...a, label: a.customerName ? `${a.name} — ${a.customerName}` : a.name, hours: +(a.minutes / 60).toFixed(1), totalHours: +(stats.totalRoundedMinutes / 60).toFixed(1) }))}
                   dataKey="hours"
                   nameKey="label"
-                  cx="50%"
-                  cy="50%"
+                  cx="50%" cy="50%"
                   outerRadius={90}
                   stroke="none"
                 >
@@ -287,8 +351,8 @@ export default function StatsPage() {
         )}
 
         {stats.byActivity.length > 0 && (
-          <section className="stats-section stats-half">
-            <h2>Par activité</h2>
+          <section className="flex-1 min-w-0 space-y-3">
+            <h2 className="text-lg font-semibold">Par activité</h2>
             {(() => {
               const grouped = stats.byActivity.reduce<Record<string, number>>((acc, a) => {
                 acc[a.name] = (acc[a.name] || 0) + a.minutes;
@@ -312,9 +376,8 @@ export default function StatsPage() {
         )}
       </div>
 
-
       {stats.byDay.length === 0 && (
-        <p style={{ color: 'var(--color-text-muted)', textAlign: 'center', marginTop: '2rem' }}>
+        <p className="text-muted-foreground text-center mt-8">
           Aucune donnée pour cette période.
         </p>
       )}
