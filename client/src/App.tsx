@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Download, Moon, Sun } from 'lucide-react';
 import TrackerPage from './pages/TrackerPage';
 import ActivitiesPage from './pages/ActivitiesPage';
 import CustomersPage from './pages/CustomersPage';
@@ -21,7 +23,7 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('theme', theme);
   }, [theme]);
 
@@ -32,27 +34,70 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <nav>
-        <NavLink to="/">Feuilles de temps</NavLink>
-        <NavLink to="/stats">Stats</NavLink>
-        <NavLink to="/activities">Activités</NavLink>
-        <NavLink to="/customers">Clients</NavLink>
-        <button className="nav-btn" onClick={handleExport} title="Exporter CSV">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 10v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-3" />
-            <path d="M8 2v8" />
-            <path d="M5 7l3 3 3-3" />
-          </svg>
-        </button>
-        <button
-          className="nav-btn"
-          onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')}
-          title={theme === 'light' ? 'Mode sombre' : 'Mode clair'}
+      <nav className="flex items-center gap-1.5 px-5 h-14 bg-card border-b border-border sticky top-0 z-50">
+        <NavLink
+          to="/"
+          className={({ isActive }) =>
+            `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+              isActive
+                ? 'text-primary bg-primary/10 font-semibold'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+            }`
+          }
         >
-          {theme === 'light' ? '☾' : '☀'}
-        </button>
+          Feuilles de temps
+        </NavLink>
+        <NavLink
+          to="/stats"
+          className={({ isActive }) =>
+            `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+              isActive
+                ? 'text-primary bg-primary/10 font-semibold'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+            }`
+          }
+        >
+          Stats
+        </NavLink>
+        <NavLink
+          to="/activities"
+          className={({ isActive }) =>
+            `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+              isActive
+                ? 'text-primary bg-primary/10 font-semibold'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+            }`
+          }
+        >
+          Activités
+        </NavLink>
+        <NavLink
+          to="/customers"
+          className={({ isActive }) =>
+            `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+              isActive
+                ? 'text-primary bg-primary/10 font-semibold'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+            }`
+          }
+        >
+          Clients
+        </NavLink>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button variant="outline" size="icon" onClick={handleExport} title="Exporter CSV">
+            <Download className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')}
+            title={theme === 'light' ? 'Mode sombre' : 'Mode clair'}
+          >
+            {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+          </Button>
+        </div>
       </nav>
-      <main>
+      <main className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-12">
         <Routes>
           <Route path="/" element={<TrackerPage />} />
           <Route path="/activities" element={<ActivitiesPage />} />

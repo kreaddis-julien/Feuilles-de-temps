@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Customer, CustomersData, CustomerType } from '../types';
 import * as api from '../api';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog';
 
 export default function CustomersPage() {
   const [data, setData] = useState<CustomersData>({ customers: [] });
@@ -48,68 +54,84 @@ export default function CustomersPage() {
   const sorted = [...data.customers].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 
   return (
-    <div className="activities-page">
-      <h1>Clients</h1>
+    <div className="space-y-6 animate-in fade-in duration-200">
+      <h1 className="text-2xl font-semibold">Clients</h1>
 
-      <form onSubmit={handleCreate} className="add-activity-form">
-        <input
-          type="text"
+      <form onSubmit={handleCreate} className="flex gap-2 items-center flex-wrap">
+        <Input
           placeholder="Nom du client"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
+          className="flex-1 max-w-80"
         />
-        <select value={newType} onChange={(e) => setNewType(e.target.value as CustomerType)}>
+        <select
+          className="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] min-w-32"
+          value={newType}
+          onChange={(e) => setNewType(e.target.value as CustomerType)}
+        >
           {types.map((t) => (
             <option key={t} value={t}>{typeLabel(t)}</option>
           ))}
         </select>
-        <button type="submit">Ajouter</button>
+        <Button type="submit">Ajouter</Button>
       </form>
 
-      <div className="customers-list">
+      <div className="space-y-2">
         {sorted.map((c) => (
-          <div key={c.id} className="customer-card" onClick={() => openEdit(c)}>
-            <div>
-              <strong>{c.name}</strong>
-              <span className="activity-customer">{typeLabel(c.type)}</span>
-            </div>
-          </div>
+          <Card
+            key={c.id}
+            className="py-3 gap-0 cursor-pointer hover:border-primary transition-colors"
+            onClick={() => openEdit(c)}
+          >
+            <CardContent className="flex items-center justify-between">
+              <div>
+                <strong className="text-sm font-semibold">{c.name}</strong>
+                <span className="ml-2 text-sm text-muted-foreground">{typeLabel(c.type)}</span>
+              </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
-      {editing && (
-        <div className="modal-overlay" onClick={() => setEditing(null)}>
-          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
-            <h2>Modifier le client</h2>
-            <div className="modal-field">
-              <label>Nom</label>
-              <input
-                type="text"
+      <Dialog open={!!editing} onOpenChange={(open) => { if (!open) setEditing(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Modifier le client</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-muted-foreground">Nom</label>
+              <Input
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
               />
             </div>
-            <div className="modal-field">
-              <label>Type</label>
-              <select value={editType} onChange={(e) => setEditType(e.target.value as CustomerType)}>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-muted-foreground">Type</label>
+              <select
+                className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                value={editType}
+                onChange={(e) => setEditType(e.target.value as CustomerType)}
+              >
                 {types.map((t) => (
                   <option key={t} value={t}>{typeLabel(t)}</option>
                 ))}
               </select>
             </div>
-            <div className="modal-actions">
-              <button className="btn-danger" onClick={async () => {
-                await handleDelete(editing.id);
-                setEditing(null);
-              }}>
-                Supprimer
-              </button>
-              <button onClick={() => setEditing(null)}>Annuler</button>
-              <button className="btn-primary" onClick={saveEdit}>Enregistrer</button>
-            </div>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="destructive" onClick={async () => {
+              if (!editing) return;
+              await handleDelete(editing.id);
+              setEditing(null);
+            }}>
+              Supprimer
+            </Button>
+            <Button variant="outline" onClick={() => setEditing(null)}>Annuler</Button>
+            <Button onClick={saveEdit}>Enregistrer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
