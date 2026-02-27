@@ -7,7 +7,10 @@
     "dev:client": "cd client && bun run dev",
     "test": "concurrently \"bun run test:server\" \"bun run test:client\"",
     "test:server": "cd server && bun run test",
-    "test:client": "cd client && bun run test"
+    "test:client": "cd client && bun run test",
+    "build:server": "bun build server/src/index.ts --compile --outfile src-tauri/binaries/timesheet-server-aarch64-apple-darwin",
+    "dev:tauri": "cargo tauri dev",
+    "build:tauri": "bun run build:server && cargo tauri build"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

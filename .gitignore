@@ -4,3 +4,5 @@ data/
 exports/
 .env
 .worktrees/
+src-tauri/target/
+src-tauri/binaries/
