@@ -7,7 +7,7 @@ import * as api from '../api';
 import type { StatsData } from '../api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,6 +54,19 @@ function formatH(minutes: number): string {
 function shortDate(dateStr: string): string {
   const [, m, d] = dateStr.split('-');
   return `${d}/${m}`;
+}
+
+function formatDateFR(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+  return `${days[date.getDay()]}. ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
+}
+
+function formatMonthFR(dateStr: string): string {
+  const [y, m] = dateStr.split('-').map(Number);
+  const months = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+  return `${months[m - 1]} ${y}`;
 }
 
 const COLORS = ['#49aeff', '#fc0036', '#29a948', '#ffae00', '#f32882', '#00ac96', '#f97ea8', '#a8a8a8'];
@@ -167,10 +180,27 @@ export default function StatsPage() {
   const periodLabel = period === 'custom'
     ? `${shortDate(range.from)} — ${shortDate(range.to)}`
     : period === 'day'
-      ? refDate
+      ? formatDateFR(refDate)
       : period === 'week'
         ? `${shortDate(range.from)} — ${shortDate(range.to)}`
-        : `${range.from.slice(0, 7)}`;
+        : formatMonthFR(refDate);
+
+  const today = todayStr();
+  const isCurrentPeriod = period === 'day'
+    ? refDate === today
+    : period === 'week'
+      ? startOfWeek(refDate) === startOfWeek(today)
+      : period === 'month'
+        ? refDate.slice(0, 7) === today.slice(0, 7)
+        : true;
+
+  const currentPeriodLabel = period === 'day'
+    ? "Aujourd'hui"
+    : period === 'week'
+      ? 'Cette semaine'
+      : period === 'month'
+        ? 'Ce mois'
+        : '';
 
   const theme = useChartTheme();
 
@@ -218,12 +248,23 @@ export default function StatsPage() {
             <Button variant="outline" size="icon" onClick={() => shiftPeriod(-1)}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="text-base font-semibold tabular-nums min-w-[8em] text-center">
+            <span className="text-base font-semibold tabular-nums min-w-[12em] text-center">
               {periodLabel}
             </span>
             <Button variant="outline" size="icon" onClick={() => shiftPeriod(1)}>
               <ChevronRight className="h-4 w-4" />
             </Button>
+            {currentPeriodLabel && (
+              <Button
+                variant="outline"
+                size="sm"
+                className={isCurrentPeriod ? 'invisible' : ''}
+                onClick={() => setRefDate(todayStr())}
+              >
+                <CalendarDays className="h-3.5 w-3.5" />
+                {currentPeriodLabel}
+              </Button>
+            )}
           </div>
         )}
       </div>

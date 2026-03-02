@@ -9,6 +9,12 @@ export class Storage {
     await fs.mkdir(this.dataDir, { recursive: true });
   }
 
+  private async atomicWrite(filePath: string, data: string): Promise<void> {
+    const tmp = filePath + '.tmp';
+    await fs.writeFile(tmp, data);
+    await fs.rename(tmp, filePath);
+  }
+
   async loadActivities(): Promise<ActivitiesData> {
     try {
       const raw = await fs.readFile(
@@ -47,7 +53,7 @@ export class Storage {
 
   async saveActivities(data: ActivitiesData): Promise<void> {
     await this.ensureDir();
-    await fs.writeFile(
+    await this.atomicWrite(
       path.join(this.dataDir, 'activities.json'),
       JSON.stringify(data, null, 2),
     );
@@ -71,7 +77,7 @@ export class Storage {
 
   async saveCustomers(data: CustomersData): Promise<void> {
     await this.ensureDir();
-    await fs.writeFile(
+    await this.atomicWrite(
       path.join(this.dataDir, 'customers.json'),
       JSON.stringify(data, null, 2),
     );
@@ -99,7 +105,7 @@ export class Storage {
 
   async saveTimesheet(data: TimesheetDay): Promise<void> {
     await this.ensureDir();
-    await fs.writeFile(
+    await this.atomicWrite(
       path.join(this.dataDir, `${data.date}.json`),
       JSON.stringify(data, null, 2),
     );

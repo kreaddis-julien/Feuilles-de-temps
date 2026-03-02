@@ -5,9 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Download, Moon, Sun, QrCode } from 'lucide-react';
 import TrackerPage from './pages/TrackerPage';
-import ActivitiesPage from './pages/ActivitiesPage';
-import CustomersPage from './pages/CustomersPage';
 import StatsPage from './pages/StatsPage';
+import SettingsPage from './pages/SettingsPage';
 import * as api from './api';
 
 function getInitialTheme(): 'light' | 'dark' {
@@ -55,56 +54,46 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <nav className="flex items-center gap-1.5 px-5 h-14 bg-card border-b border-border sticky top-0 z-50">
-        <NavLink
-          to="/"
-          className={({ isActive }) =>
-            `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-              isActive
-                ? 'text-primary bg-primary/10 font-semibold'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-            }`
-          }
-        >
-          Feuilles de temps
-        </NavLink>
-        <NavLink
-          to="/stats"
-          className={({ isActive }) =>
-            `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-              isActive
-                ? 'text-primary bg-primary/10 font-semibold'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-            }`
-          }
-        >
-          Stats
-        </NavLink>
-        <NavLink
-          to="/activities"
-          className={({ isActive }) =>
-            `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-              isActive
-                ? 'text-primary bg-primary/10 font-semibold'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-            }`
-          }
-        >
-          Activités
-        </NavLink>
-        <NavLink
-          to="/customers"
-          className={({ isActive }) =>
-            `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-              isActive
-                ? 'text-primary bg-primary/10 font-semibold'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-            }`
-          }
-        >
-          Clients
-        </NavLink>
-        <div className="ml-auto flex items-center gap-1.5">
+      <nav className="relative flex items-center justify-center px-5 h-14 bg-card border-b border-border sticky top-0 z-50">
+        <div className="flex gap-1.5">
+          <NavLink
+            to="/"
+            className={({ isActive }) =>
+              `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                isActive
+                  ? 'text-primary bg-primary/10 font-semibold'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+              }`
+            }
+          >
+            Feuilles de temps
+          </NavLink>
+          <NavLink
+            to="/stats"
+            className={({ isActive }) =>
+              `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                isActive
+                  ? 'text-primary bg-primary/10 font-semibold'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+              }`
+            }
+          >
+            Stats
+          </NavLink>
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                isActive
+                  ? 'text-primary bg-primary/10 font-semibold'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+              }`
+            }
+          >
+            Paramètres
+          </NavLink>
+        </div>
+        <div className="absolute right-5 flex items-center gap-1.5">
           {isTauri && (
             <Button variant="outline" size="icon" onClick={() => setQrOpen(true)} title="Accès mobile">
               <QrCode className="h-4 w-4" />
@@ -126,9 +115,8 @@ export default function App() {
       <main className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-12">
         <Routes>
           <Route path="/" element={<TrackerPage />} />
-          <Route path="/activities" element={<ActivitiesPage />} />
-          <Route path="/customers" element={<CustomersPage />} />
           <Route path="/stats" element={<StatsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
       <Dialog open={qrOpen} onOpenChange={setQrOpen}>

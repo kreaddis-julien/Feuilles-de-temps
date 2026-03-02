@@ -12,7 +12,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { ChevronLeft, ChevronRight, Play, Pause, Square, Trash2, RotateCcw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Pause, Square, Trash2, RotateCcw, CalendarDays } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -62,6 +62,13 @@ function resolveCustomerName(activityId: string, activitiesList: { id: string; c
 function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatDateFR(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+  return `${days[date.getDay()]}. ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
 }
 
 function parseTimestamp(value: string): Date {
@@ -199,16 +206,22 @@ export default function TrackerPage() {
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* ===== Date Navigation ===== */}
-      <div className="flex items-center justify-center gap-4">
+      <div className="relative flex items-center justify-center gap-4">
         <Button variant="outline" size="icon" onClick={() => shiftDate(-1)}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <span className="text-base font-semibold tabular-nums min-w-[8em] text-center">
-          {currentDate}
+        <span className="text-base font-semibold tabular-nums min-w-[12em] text-center">
+          {formatDateFR(currentDate)}
         </span>
         <Button variant="outline" size="icon" onClick={() => shiftDate(1)}>
           <ChevronRight className="h-4 w-4" />
         </Button>
+        {currentDate !== todayStr() && (
+          <Button variant="outline" size="sm" className="absolute right-0" onClick={() => setCurrentDate(todayStr())}>
+            <CalendarDays className="h-3.5 w-3.5" />
+            Aujourd'hui
+          </Button>
+        )}
       </div>
 
       {/* ===== Progress Bar ===== */}
@@ -319,23 +332,23 @@ export default function TrackerPage() {
       {completedEntries.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-lg font-semibold">Terminées</h2>
-          <Table>
+          <Table className="table-fixed w-full">
             <TableHeader>
               <TableRow>
-                <TableHead>Client</TableHead>
-                <TableHead>Activité</TableHead>
+                <TableHead className="w-[15%]">Client</TableHead>
+                <TableHead className="w-[18%]">Activité</TableHead>
                 <TableHead>Description</TableHead>
-                <TableHead>Durée</TableHead>
-                <TableHead></TableHead>
+                <TableHead className="w-[4.5rem]">Durée</TableHead>
+                <TableHead className="w-[5.5rem]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {completedEntries.map(entry => (
                 <TableRow key={entry.id}>
-                  <TableCell>
+                  <TableCell className="truncate">
                     {resolveCustomerName(entry.activityId, activities.activities, customers.customers) || '—'}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="truncate">
                     <span
                       className="cursor-pointer border-b border-dashed border-border hover:bg-accent px-1 py-0.5 rounded-sm transition-colors"
                       onClick={() => openEditModal(entry)}
@@ -343,7 +356,7 @@ export default function TrackerPage() {
                       {entryLabel(entry, activities.activities) || '—'}
                     </span>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="truncate">
                     <span
                       className="cursor-pointer border-b border-dashed border-border hover:bg-accent px-1 py-0.5 rounded-sm transition-colors"
                       onClick={() => openEditModal(entry)}
@@ -360,14 +373,12 @@ export default function TrackerPage() {
                     </span>
                   </TableCell>
                   <TableCell>
-                    <div className="flex gap-1.5">
-                      <Button variant="outline" size="xs" onClick={() => handleResume(entry.id)}>
+                    <div className="flex gap-1">
+                      <Button variant="outline" size="icon-xs" onClick={() => handleResume(entry.id)} title="Relancer">
                         <RotateCcw className="h-3 w-3" />
-                        Relancer
                       </Button>
-                      <Button variant="destructive" size="xs" onClick={() => handleDeleteEntry(entry.id)}>
+                      <Button variant="destructive" size="icon-xs" onClick={() => handleDeleteEntry(entry.id)} title="Supprimer">
                         <Trash2 className="h-3 w-3" />
-                        Supprimer
                       </Button>
                     </div>
                   </TableCell>
