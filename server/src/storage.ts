@@ -1,8 +1,12 @@
 import fs from 'fs/promises';
+import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync } from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import type { CustomersData, ActivitiesData, TimesheetDay } from './types.js';
 
 export class Storage {
+  private writeLocks = new Map<string, Promise<void>>();
+
   constructor(private dataDir: string) {}
 
   private async ensureDir(): Promise<void> {
@@ -10,9 +14,26 @@ export class Storage {
   }
 
   private async atomicWrite(filePath: string, data: string): Promise<void> {
-    const tmp = filePath + '.tmp';
-    await fs.writeFile(tmp, data);
-    await fs.rename(tmp, filePath);
+    // Serialize writes to the same file to prevent races
+    const prev = this.writeLocks.get(filePath) ?? Promise.resolve();
+    const current = prev.then(() => this.doAtomicWrite(filePath, data));
+    this.writeLocks.set(filePath, current.catch(() => {}));
+    await current;
+  }
+
+  private async doAtomicWrite(filePath: string, data: string): Promise<void> {
+    const tmp = filePath + '.' + crypto.randomBytes(6).toString('hex') + '.tmp';
+    try {
+      // Sync write + fsync to ensure data hits disk before rename
+      const fd = openSync(tmp, 'w');
+      writeSync(fd, data);
+      fsyncSync(fd);
+      closeSync(fd);
+      renameSync(tmp, filePath);
+    } catch (err) {
+      try { unlinkSync(tmp); } catch {}
+      throw err;
+    }
   }
 
   async loadActivities(): Promise<ActivitiesData> {
