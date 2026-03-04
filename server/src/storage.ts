@@ -16,11 +16,14 @@ export class Storage {
   }
 
   async loadActivities(): Promise<ActivitiesData> {
+    const filePath = path.join(this.dataDir, 'activities.json');
+    let raw: string | null = null;
     try {
-      const raw = await fs.readFile(
-        path.join(this.dataDir, 'activities.json'),
-        'utf-8',
-      );
+      raw = await fs.readFile(filePath, 'utf-8');
+    } catch (err: any) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+    if (raw !== null) {
       const data = JSON.parse(raw) as ActivitiesData;
       for (const a of data.activities) {
         if (!('customerId' in a)) (a as any).customerId = '';
@@ -28,26 +31,26 @@ export class Storage {
         delete (a as any).tasks;
       }
       return data;
-    } catch {
-      // Migration: try loading from legacy projects.json
-      try {
-        const raw = await fs.readFile(
-          path.join(this.dataDir, 'projects.json'),
-          'utf-8',
-        );
-        const legacy = JSON.parse(raw);
-        const activities = (legacy.projects || []).map((p: any) => {
-          if (!('customerId' in p)) p.customerId = '';
-          delete p.category;
-          delete p.tasks;
-          return p;
-        });
-        const data: ActivitiesData = { activities };
-        await this.saveActivities(data);
-        return data;
-      } catch {
-        return { activities: [] };
-      }
+    }
+    // Migration: try loading from legacy projects.json
+    try {
+      const legacyRaw = await fs.readFile(
+        path.join(this.dataDir, 'projects.json'),
+        'utf-8',
+      );
+      const legacy = JSON.parse(legacyRaw);
+      const activities = (legacy.projects || []).map((p: any) => {
+        if (!('customerId' in p)) p.customerId = '';
+        delete p.category;
+        delete p.tasks;
+        return p;
+      });
+      const data: ActivitiesData = { activities };
+      await this.saveActivities(data);
+      return data;
+    } catch (err: any) {
+      if (err.code !== 'ENOENT') throw err;
+      return { activities: [] };
     }
   }
 
@@ -60,19 +63,19 @@ export class Storage {
   }
 
   async loadCustomers(): Promise<CustomersData> {
+    const filePath = path.join(this.dataDir, 'customers.json');
+    let raw: string;
     try {
-      const raw = await fs.readFile(
-        path.join(this.dataDir, 'customers.json'),
-        'utf-8',
-      );
-      const data = JSON.parse(raw) as CustomersData;
-      for (const c of data.customers) {
-        if (!c.type) c.type = 'externe';
-      }
-      return data;
-    } catch {
-      return { customers: [] };
+      raw = await fs.readFile(filePath, 'utf-8');
+    } catch (err: any) {
+      if (err.code === 'ENOENT') return { customers: [] };
+      throw err;
     }
+    const data = JSON.parse(raw) as CustomersData;
+    for (const c of data.customers) {
+      if (!c.type) c.type = 'externe';
+    }
+    return data;
   }
 
   async saveCustomers(data: CustomersData): Promise<void> {
@@ -84,23 +87,25 @@ export class Storage {
   }
 
   async loadTimesheet(date: string): Promise<TimesheetDay> {
+    const filePath = path.join(this.dataDir, `${date}.json`);
+    let raw: string;
     try {
-      const raw = await fs.readFile(
-        path.join(this.dataDir, `${date}.json`),
-        'utf-8',
-      );
-      const data = JSON.parse(raw) as TimesheetDay;
-      // Migrate: rename projectId → activityId in existing entries
-      for (const entry of data.entries) {
-        if ('projectId' in entry && !('activityId' in entry)) {
-          (entry as any).activityId = (entry as any).projectId;
-          delete (entry as any).projectId;
-        }
+      raw = await fs.readFile(filePath, 'utf-8');
+    } catch (err: any) {
+      if (err.code === 'ENOENT') {
+        return { date, entries: [], activeEntry: null, pausedEntries: [] };
       }
-      return data;
-    } catch {
-      return { date, entries: [], activeEntry: null, pausedEntries: [] };
+      throw err;
     }
+    const data = JSON.parse(raw) as TimesheetDay;
+    // Migrate: rename projectId → activityId in existing entries
+    for (const entry of data.entries) {
+      if ('projectId' in entry && !('activityId' in entry)) {
+        (entry as any).activityId = (entry as any).projectId;
+        delete (entry as any).projectId;
+      }
+    }
+    return data;
   }
 
   async saveTimesheet(data: TimesheetDay): Promise<void> {
