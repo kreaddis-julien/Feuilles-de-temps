@@ -270,28 +270,33 @@ export default function StatsPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4 sm:gap-4">
-        <Card className="py-4 gap-0">
-          <CardContent className="text-center">
-            <div className="text-2xl font-bold text-primary tabular-nums">{formatH(stats.totalRoundedMinutes)}</div>
-            <div className="text-xs text-muted-foreground uppercase tracking-wide mt-1">Total</div>
-          </CardContent>
-        </Card>
-        <Card className="py-4 gap-0">
-          <CardContent className="text-center">
-            <div className="text-2xl font-bold text-primary tabular-nums">{stats.entryCount}</div>
-            <div className="text-xs text-muted-foreground uppercase tracking-wide mt-1">Entrées</div>
-          </CardContent>
-        </Card>
-        <Card className="py-4 gap-0">
-          <CardContent className="text-center">
-            <div className="text-2xl font-bold text-primary tabular-nums">
-              {stats.byDay.length > 0 ? formatH(Math.round(stats.totalRoundedMinutes / stats.byDay.length)) : '0h'}
-            </div>
-            <div className="text-xs text-muted-foreground uppercase tracking-wide mt-1">Moy / jour</div>
-          </CardContent>
-        </Card>
-      </div>
+      {(() => {
+        const cards: { value: string; label: string }[] = [
+          { value: formatH(stats.totalRoundedMinutes), label: 'Total' },
+          { value: String(stats.entryCount), label: 'Entrées' },
+        ];
+        if (period === 'week' || period === 'month' || period === 'custom') {
+          const avgDay = stats.byDay.length > 0 ? Math.round(stats.totalRoundedMinutes / stats.byDay.length) : 0;
+          cards.push({ value: formatH(avgDay), label: 'Moy / jour' });
+        }
+        if (period === 'month' || period === 'custom') {
+          const weeks = new Set(stats.byDay.map(d => startOfWeek(d.date)));
+          const avgWeek = weeks.size > 0 ? Math.round(stats.totalRoundedMinutes / weeks.size) : 0;
+          cards.push({ value: formatH(avgWeek), label: 'Moy / semaine' });
+        }
+        return (
+          <div className={`grid gap-4 sm:gap-4`} style={{ gridTemplateColumns: `repeat(${cards.length}, minmax(0, 1fr))` }}>
+            {cards.map(({ value, label }) => (
+              <Card key={label} className="py-4 gap-0">
+                <CardContent className="text-center">
+                  <div className="text-2xl font-bold text-primary tabular-nums">{value}</div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide mt-1">{label}</div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Daily bar chart */}
       {dayData.length > 0 && (
