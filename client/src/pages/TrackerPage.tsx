@@ -155,12 +155,22 @@ export default function TrackerPage() {
 
   async function handlePause() {
     if (!day || !activeEntry) return;
+    // Save description + activity before pausing, so unsaved local edits aren't lost
+    await api.updateEntry(currentDate, activeEntry.id, {
+      description: activeEntry.description,
+      activityId: activeEntry.activityId,
+    });
     await api.pauseEntry(currentDate, activeEntry.id);
     await refresh();
   }
 
   async function handleFinish() {
     if (!day || !activeEntry) return;
+    // Save description + activity before completing, so unsaved local edits aren't lost
+    await api.updateEntry(currentDate, activeEntry.id, {
+      description: activeEntry.description,
+      activityId: activeEntry.activityId,
+    });
     await api.updateEntry(currentDate, activeEntry.id, { status: 'completed' });
     await refresh();
   }
