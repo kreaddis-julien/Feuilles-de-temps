@@ -7,6 +7,7 @@ import { Download, Moon, Sun, QrCode } from 'lucide-react';
 import TrackerPage from './pages/TrackerPage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
+import TrayPopupPage from './pages/TrayPopupPage';
 import * as api from './api';
 
 function getInitialTheme(): 'light' | 'dark' {
@@ -22,7 +23,11 @@ function todayStr(): string {
 
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
 
-export default function App() {
+// Inner component so we can use useLocation
+function AppInner() {
+  // Tauri loads the popup window with a hash: index.html#/tray-popup
+  const isTrayPopup = typeof window !== 'undefined' && window.location.hash.includes('#/tray-popup');
+
   const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
   const [qrOpen, setQrOpen] = useState(false);
   const [mobileUrl, setMobileUrl] = useState<string | null>(null);
@@ -52,8 +57,13 @@ export default function App() {
     URL.revokeObjectURL(a.href);
   }
 
+  // Tray popup: render just the popup page with the right theme, no navbar
+  if (isTrayPopup) {
+    return <TrayPopupPage />;
+  }
+
   return (
-    <BrowserRouter>
+    <>
       <nav className="relative flex items-center justify-center px-5 h-14 bg-card border-b border-border sticky top-0 z-50">
         <div className="flex gap-1.5">
           <NavLink
@@ -136,6 +146,14 @@ export default function App() {
           </div>
         </DialogContent>
       </Dialog>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppInner />
     </BrowserRouter>
   );
 }

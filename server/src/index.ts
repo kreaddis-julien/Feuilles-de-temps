@@ -14,3 +14,7 @@ const PORT = 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://0.0.0.0:${PORT}`);
 });
+
+// AJOUTEZ CECI :
+// Hack pour empêcher l'exécutable Bun de se fermer immédiatement
+setInterval(() => {}, 1000 * 60 * 60);
