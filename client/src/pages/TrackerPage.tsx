@@ -14,6 +14,17 @@ import {
 } from '@/components/ui/dialog';
 import { ChevronLeft, ChevronRight, Play, Pause, Square, Trash2, RotateCcw, CalendarDays } from 'lucide-react';
 
+const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
+
+async function updateTrayTitle(text: string) {
+  if (!isTauri) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('set_tray_title', { title: text });
+  } catch { /* ignore outside Tauri */ }
+}
+
+
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
@@ -120,7 +131,11 @@ export default function TrackerPage() {
     day?.entries.find(e => e.id === day.activeEntry);
 
   useEffect(() => {
-    if (!activeEntry) { setElapsed(0); return; }
+    if (!activeEntry) {
+      setElapsed(0);
+      updateTrayTitle(''); // clear tray title when no active timer
+      return;
+    }
     function computeElapsed() {
       if (!activeEntry) return 0;
       let totalSec = 0;
@@ -134,10 +149,17 @@ export default function TrackerPage() {
       }
       return totalSec;
     }
-    setElapsed(computeElapsed());
-    const id = setInterval(() => setElapsed(computeElapsed()), 1000);
+    const current = computeElapsed();
+    setElapsed(current);
+    updateTrayTitle(formatTimer(current));
+    const id = setInterval(() => {
+      const secs = computeElapsed();
+      setElapsed(secs);
+      updateTrayTitle(formatTimer(secs));
+    }, 1000);
     return () => clearInterval(id);
   }, [activeEntry]);
+
 
   const pausedEntries: TimesheetEntry[] =
     day?.pausedEntries
