@@ -71,7 +71,7 @@ export default function NavTimerWidget() {
   const [day, setDay] = useState<TimesheetDay | null>(null);
   const [activities, setActivities] = useState<ActivitiesData>({ activities: [] });
   const [_customers, setCustomers] = useState<CustomersData>({ customers: [] });
-  const [elapsed, setElapsed] = useState(0);
+  const [elapsedMap, setElapsedMap] = useState<Record<string, number>>({});
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [currentDate, setCurrentDate] = useState(todayStr);
@@ -111,14 +111,24 @@ export default function NavTimerWidget() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  // Elapsed ticker for active entry
-  const activeEntry = day?.entries.find(e => e.id === day.activeEntry);
+  // Elapsed ticker for active entries
+  const activeEntries: TimesheetEntry[] =
+    day?.activeEntries
+      ?.map(id => day.entries.find(e => e.id === id))
+      .filter((e): e is TimesheetEntry => !!e) ?? [];
   useEffect(() => {
-    if (!activeEntry) { setElapsed(0); return; }
-    setElapsed(computeElapsedSeconds(activeEntry));
-    const id = setInterval(() => setElapsed(computeElapsedSeconds(activeEntry)), 1000);
+    if (activeEntries.length === 0) { setElapsedMap({}); return; }
+    function tick() {
+      const map: Record<string, number> = {};
+      for (const entry of activeEntries) {
+        map[entry.id] = computeElapsedSeconds(entry);
+      }
+      setElapsedMap(map);
+    }
+    tick();
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [activeEntry]);
+  }, [activeEntries.length, activeEntries.map(e => e.id).join(',')]);
 
   // Close on outside click
   useEffect(() => {
@@ -136,29 +146,29 @@ export default function NavTimerWidget() {
       .map(id => day.entries.find(e => e.id === id))
       .filter((e): e is TimesheetEntry => !!e) ?? [];
 
-  async function handlePause() {
-    if (!day || !activeEntry) return;
+  async function handlePause(entry: TimesheetEntry) {
+    if (!day) return;
     setLoading(true);
     try {
-      await api.pauseEntry(currentDate, activeEntry.id);
+      await api.pauseEntry(currentDate, entry.id);
       await refresh();
     } finally { setLoading(false); }
   }
 
-  async function handleFinish() {
-    if (!day || !activeEntry) return;
+  async function handleFinish(entry: TimesheetEntry) {
+    if (!day) return;
     setLoading(true);
     try {
-      await api.updateEntry(currentDate, activeEntry.id, { status: 'completed' });
+      await api.updateEntry(currentDate, entry.id, { status: 'completed' });
       await refresh();
     } finally { setLoading(false); }
   }
 
-  async function handleCancel() {
-    if (!day || !activeEntry) return;
+  async function handleCancel(entry: TimesheetEntry) {
+    if (!day) return;
     setLoading(true);
     try {
-      await api.deleteEntry(currentDate, activeEntry.id);
+      await api.deleteEntry(currentDate, entry.id);
       await refresh();
     } finally { setLoading(false); }
   }
@@ -179,7 +189,7 @@ export default function NavTimerWidget() {
     } finally { setLoading(false); }
   }
 
-  const hasActive = !!activeEntry;
+  const hasActive = activeEntries.length > 0;
   const hasPaused = pausedEntries.length > 0;
   const hasAnything = hasActive || hasPaused;
 
@@ -218,7 +228,11 @@ export default function NavTimerWidget() {
 
         {/* Timer or paused label */}
         <span className="font-mono tabular-nums tracking-wide">
-          {hasActive ? formatTimer(elapsed) : `${pausedEntries.length} en pause`}
+          {hasActive
+            ? (activeEntries.length === 1
+              ? formatTimer(elapsedMap[activeEntries[0].id] ?? 0)
+              : `${activeEntries.length} actifs`)
+            : `${pausedEntries.length} en pause`}
         </span>
 
         <ChevronDown
@@ -232,64 +246,65 @@ export default function NavTimerWidget() {
           className="absolute right-0 top-[calc(100%+8px)] w-80 rounded-2xl border border-border bg-popover shadow-2xl backdrop-blur-sm overflow-hidden z-[100]"
           style={{ animation: 'timerDropdownIn 0.18s cubic-bezier(0.16,1,0.3,1)' }}
         >
-          {/* Active timer */}
-          {activeEntry && (
-            <div className="p-4 border-b border-border">
-              {/* Activity name */}
-              <div className="flex items-center gap-2 mb-3">
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                </span>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider truncate">
-                  En cours
-                </p>
-              </div>
+          {/* Active timers */}
+          {activeEntries.length > 0 && (
+            <div>
+              {activeEntries.map(entry => (
+                <div key={entry.id} className="p-4 border-b border-border">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="relative flex h-2 w-2 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                    </span>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider truncate">
+                      En cours
+                    </p>
+                  </div>
 
-              <p className="text-sm font-semibold truncate mb-3 text-foreground">
-                {entryLabel(activeEntry, activities)}
-              </p>
+                  <p className="text-sm font-semibold truncate mb-3 text-foreground">
+                    {entryLabel(entry, activities)}
+                  </p>
 
-              {/* Big timer */}
-              <div className="text-center mb-4">
-                <span className="font-mono text-4xl font-bold tabular-nums tracking-tight text-foreground">
-                  {formatTimer(elapsed)}
-                </span>
-              </div>
+                  <div className="text-center mb-4">
+                    <span className="font-mono text-4xl font-bold tabular-nums tracking-tight text-foreground">
+                      {formatTimer(elapsedMap[entry.id] ?? 0)}
+                    </span>
+                  </div>
 
-              {/* Controls */}
-              <div className="flex gap-2">
-                <button
-                  onClick={handlePause}
-                  disabled={loading}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-border bg-card hover:bg-accent transition-all duration-150 disabled:opacity-50"
-                >
-                  <Pause className="h-3.5 w-3.5" />
-                  Pause
-                </button>
-                <button
-                  onClick={handleFinish}
-                  disabled={loading}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-all duration-150 disabled:opacity-50"
-                >
-                  <Square className="h-3.5 w-3.5" />
-                  Terminer
-                </button>
-                <button
-                  onClick={handleCancel}
-                  disabled={loading}
-                  title="Annuler et supprimer"
-                  className="flex items-center justify-center p-2 rounded-xl text-xs font-semibold border border-destructive/30 text-destructive bg-destructive/5 hover:bg-destructive/10 transition-all duration-150 disabled:opacity-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handlePause(entry)}
+                      disabled={loading}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-border bg-card hover:bg-accent transition-all duration-150 disabled:opacity-50"
+                    >
+                      <Pause className="h-3.5 w-3.5" />
+                      Pause
+                    </button>
+                    <button
+                      onClick={() => handleFinish(entry)}
+                      disabled={loading}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-all duration-150 disabled:opacity-50"
+                    >
+                      <Square className="h-3.5 w-3.5" />
+                      Terminer
+                    </button>
+                    <button
+                      onClick={() => handleCancel(entry)}
+                      disabled={loading}
+                      title="Annuler et supprimer"
+                      className="flex items-center justify-center p-2 rounded-xl text-xs font-semibold border border-destructive/30 text-destructive bg-destructive/5 hover:bg-destructive/10 transition-all duration-150 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
           {/* Paused timers */}
           {hasPaused && (
-            <div className={`${hasActive ? '' : 'pt-1'}`}>
+            <div className={`${activeEntries.length > 0 ? '' : 'pt-1'}`}>
               <p className="px-4 pt-3 pb-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 En pause
               </p>
