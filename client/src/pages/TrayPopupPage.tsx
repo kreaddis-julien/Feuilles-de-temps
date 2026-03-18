@@ -58,13 +58,9 @@ function computeElapsedSeconds(entry: TimesheetEntry): number {
   return totalSec;
 }
 
-function resolveActivityName(activityId: string, activities: ActivitiesData): string {
-  return activities.activities.find(a => a.id === activityId)?.name ?? '';
-}
-
-function entryLabel(entry: TimesheetEntry, activities: ActivitiesData): string {
-  const name = resolveActivityName(entry.activityId, activities);
-  if (name) return name;
+function entryLabel(entry: TimesheetEntry, activities: ActivitiesData, customersList: { id: string; name: string }[]): string {
+  const activity = activities.activities.find(a => a.id === entry.activityId);
+  if (activity) return activityOptionLabel(activity, customersList);
   const startTime = entry.segments[0]?.start;
   if (startTime) {
     const d = parseTimestamp(startTime);
@@ -386,7 +382,7 @@ export default function TrayPopupPage() {
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">En cours</p>
                 </div>
                 <p className="text-sm font-semibold truncate mb-3 mt-1 text-foreground">
-                  {entryLabel(entry, activities)}
+                  {entryLabel(entry, activities, customers.customers)}
                 </p>
 
                 <div className="flex justify-center mb-4">
@@ -439,7 +435,7 @@ export default function TrayPopupPage() {
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="h-1.5 w-1.5 rounded-full bg-warning shrink-0" />
-                  <span className="text-sm truncate">{entryLabel(entry, activities)}</span>
+                  <span className="text-sm truncate">{entryLabel(entry, activities, customers.customers)}</span>
                   <span className="text-xs text-muted-foreground shrink-0 font-mono">
                     {formatDuration(entry.totalMinutes)}
                   </span>

@@ -48,13 +48,14 @@ function computeElapsedSeconds(entry: TimesheetEntry): number {
   return totalSec;
 }
 
-function resolveActivityName(activityId: string, activities: ActivitiesData): string {
-  return activities.activities.find(a => a.id === activityId)?.name ?? '';
+function activityOptionLabel(activity: { name: string; customerId: string }, customersList: { id: string; name: string }[]): string {
+  const customer = customersList.find(c => c.id === activity.customerId);
+  return customer ? `${customer.name} - ${activity.name}` : activity.name;
 }
 
-function entryLabel(entry: TimesheetEntry, activities: ActivitiesData): string {
-  const name = resolveActivityName(entry.activityId, activities);
-  if (name) return name;
+function entryLabel(entry: TimesheetEntry, activities: ActivitiesData, customersList: { id: string; name: string }[]): string {
+  const activity = activities.activities.find(a => a.id === entry.activityId);
+  if (activity) return activityOptionLabel(activity, customersList);
   const startTime = entry.segments[0]?.start;
   if (startTime) {
     const d = parseTimestamp(startTime);
@@ -70,7 +71,7 @@ function entryLabel(entry: TimesheetEntry, activities: ActivitiesData): string {
 export default function NavTimerWidget() {
   const [day, setDay] = useState<TimesheetDay | null>(null);
   const [activities, setActivities] = useState<ActivitiesData>({ activities: [] });
-  const [_customers, setCustomers] = useState<CustomersData>({ customers: [] });
+  const [customers, setCustomers] = useState<CustomersData>({ customers: [] });
   const [elapsedMap, setElapsedMap] = useState<Record<string, number>>({});
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -269,7 +270,7 @@ export default function NavTimerWidget() {
                   </div>
 
                   <p className="text-sm font-semibold truncate mb-3 text-foreground">
-                    {entryLabel(entry, activities)}
+                    {entryLabel(entry, activities, customers.customers)}
                   </p>
 
                   <div className="text-center mb-4">
@@ -323,7 +324,7 @@ export default function NavTimerWidget() {
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="h-1.5 w-1.5 rounded-full bg-warning shrink-0" />
-                      <span className="text-sm truncate">{entryLabel(entry, activities)}</span>
+                      <span className="text-sm truncate">{entryLabel(entry, activities, customers.customers)}</span>
                       <span className="text-xs text-muted-foreground shrink-0">
                         {formatDuration(entry.totalMinutes)}
                       </span>

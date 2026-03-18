@@ -43,13 +43,9 @@ function formatTimer(totalSeconds: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-function resolveActivityName(activityId: string, activities: { id: string; name: string }[]): string {
-  return activities.find(a => a.id === activityId)?.name ?? '';
-}
-
-function entryLabel(entry: TimesheetEntry, activities: { id: string; name: string }[]): string {
-  const name = resolveActivityName(entry.activityId, activities);
-  if (name) return name;
+function entryLabel(entry: TimesheetEntry, activities: { id: string; name: string; customerId: string }[], customersList: { id: string; name: string }[]): string {
+  const activity = activities.find(a => a.id === entry.activityId);
+  if (activity) return activityOptionLabel(activity, customersList);
   const startTime = entry.segments[0]?.start;
   if (startTime) {
     const d = parseTimestamp(startTime);
@@ -356,7 +352,7 @@ export default function TrackerPage() {
               <Card key={entry.id} className="border-warning bg-warning/5 py-3 gap-0">
                 <CardContent className="flex items-center justify-between">
                   <span className="text-sm">
-                    <strong className="font-semibold">{entryLabel(entry, activities.activities)}</strong>
+                    <strong className="font-semibold">{entryLabel(entry, activities.activities, customers.customers)}</strong>
                     {' '}({formatDuration(entry.totalMinutes)})
                   </span>
                   <div className="flex gap-1.5">
@@ -409,7 +405,7 @@ export default function TrackerPage() {
                       className="cursor-pointer border-b border-dashed border-border hover:bg-accent px-1 py-0.5 rounded-sm transition-colors"
                       onClick={() => openEditModal(entry)}
                     >
-                      {entryLabel(entry, activities.activities) || '—'}
+                      {entryLabel(entry, activities.activities, customers.customers) || '—'}
                     </span>
                   </TableCell>
                   <TableCell className="truncate">
