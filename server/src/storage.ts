@@ -114,11 +114,20 @@ export class Storage {
       raw = await fs.readFile(filePath, 'utf-8');
     } catch (err: any) {
       if (err.code === 'ENOENT') {
-        return { date, entries: [], activeEntry: null, pausedEntries: [] };
+        return { date, entries: [], activeEntries: [], pausedEntries: [] };
       }
       throw err;
     }
     const data = JSON.parse(raw) as TimesheetDay;
+    // Migration: activeEntry → activeEntries
+    const rawData = data as any;
+    if ('activeEntry' in rawData) {
+      data.activeEntries = rawData.activeEntry ? [rawData.activeEntry] : [];
+      delete rawData.activeEntry;
+    }
+    if (!data.activeEntries) {
+      data.activeEntries = [];
+    }
     // Migrate: rename projectId → activityId in existing entries
     for (const entry of data.entries) {
       if ('projectId' in entry && !('activityId' in entry)) {

@@ -40,6 +40,6 @@ export interface TimesheetEntry {
 export interface TimesheetDay {
   date: string; // YYYY-MM-DD
   entries: TimesheetEntry[];
-  activeEntry: string | null;
+  activeEntries: string[];
   pausedEntries: string[];
 }

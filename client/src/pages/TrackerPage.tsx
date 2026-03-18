@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData } from '../types';
 import * as api from '../api';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,16 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
 import { ChevronLeft, ChevronRight, Play, Pause, Square, Trash2, RotateCcw, CalendarDays } from 'lucide-react';
+
+const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
+
+async function updateTrayTitle(text: string) {
+  if (!isTauri) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('set_tray_title', { title: text });
+  } catch { /* ignore outside Tauri */ }
+}
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -50,7 +60,7 @@ function entryLabel(entry: TimesheetEntry, activities: { id: string; name: strin
 
 function activityOptionLabel(activity: { name: string; customerId: string }, customersList: { id: string; name: string }[]): string {
   const customer = customersList.find(c => c.id === activity.customerId);
-  return customer ? `${activity.name} (${customer.name})` : activity.name;
+  return customer ? `${customer.name} - ${activity.name}` : activity.name;
 }
 
 function resolveCustomerName(activityId: string, activitiesList: { id: string; customerId: string }[], customersList: { id: string; name: string }[]): string {
@@ -88,13 +98,15 @@ export default function TrackerPage() {
   const [day, setDay] = useState<TimesheetDay | null>(null);
   const [activities, setActivities] = useState<ActivitiesData>({ activities: [] });
   const [customers, setCustomers] = useState<CustomersData>({ customers: [] });
-  const [elapsed, setElapsed] = useState(0);
+  const [elapsedMap, setElapsedMap] = useState<Record<string, number>>({});
   const [editingEntry, setEditingEntry] = useState<TimesheetEntry | null>(null);
   const [editActivityId, setEditActivityId] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editMinutes, setEditMinutes] = useState('');
 
-  const refresh = useCallback(async () => {
+  const syncChannel = useRef(new BroadcastChannel('tempo-sync'));
+
+  const refresh = useCallback(async (notify = false) => {
     const [t, a, c] = await Promise.all([
       api.getTimesheet(currentDate),
       api.getActivities(),
@@ -103,9 +115,14 @@ export default function TrackerPage() {
     setDay(t);
     setActivities(a);
     setCustomers(c);
+    if (notify) syncChannel.current.postMessage('refresh');
   }, [currentDate]);
 
   useEffect(() => { refresh(); }, [refresh]);
+  // Listen for cross-window sync events (from popup/navbar)
+  useEffect(() => {
+    syncChannel.current.onmessage = () => refresh();
+  }, [refresh]);
   useEffect(() => { localStorage.setItem('trackerDate', currentDate); }, [currentDate]);
 
   function shiftDate(offset: number) {
@@ -116,15 +133,25 @@ export default function TrackerPage() {
     );
   }
 
-  const activeEntry: TimesheetEntry | undefined =
-    day?.entries.find(e => e.id === day.activeEntry);
+  const activeEntries: TimesheetEntry[] =
+    day?.activeEntries
+      ?.map(id => day.entries.find(e => e.id === id))
+      .filter((e): e is TimesheetEntry => !!e) ?? [];
+
+  const pausedEntries: TimesheetEntry[] =
+    day?.pausedEntries
+      .map(id => day.entries.find(e => e.id === id))
+      .filter((e): e is TimesheetEntry => !!e) ?? [];
 
   useEffect(() => {
-    if (!activeEntry) { setElapsed(0); return; }
-    function computeElapsed() {
-      if (!activeEntry) return 0;
+    if (activeEntries.length === 0) {
+      setElapsedMap({});
+      updateTrayTitle(pausedEntries.length > 0 ? '⏸' : '');
+      return;
+    }
+    function computeElapsedSeconds(entry: TimesheetEntry): number {
       let totalSec = 0;
-      for (const seg of activeEntry.segments) {
+      for (const seg of entry.segments) {
         const startMs = parseTimestamp(seg.start).getTime();
         if (seg.end) {
           totalSec += Math.floor((parseTimestamp(seg.end).getTime() - startMs) / 1000);
@@ -134,60 +161,73 @@ export default function TrackerPage() {
       }
       return totalSec;
     }
-    setElapsed(computeElapsed());
-    const id = setInterval(() => setElapsed(computeElapsed()), 1000);
+    function tick() {
+      const map: Record<string, number> = {};
+      for (const entry of activeEntries) {
+        map[entry.id] = computeElapsedSeconds(entry);
+      }
+      setElapsedMap(map);
+      if (activeEntries.length === 1) {
+        updateTrayTitle(formatTimer(map[activeEntries[0].id] ?? 0));
+      } else {
+        updateTrayTitle(`${activeEntries.length} actifs`);
+      }
+    }
+    tick();
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [activeEntry]);
-
-  const pausedEntries: TimesheetEntry[] =
-    day?.pausedEntries
-      .map(id => day.entries.find(e => e.id === id))
-      .filter((e): e is TimesheetEntry => !!e) ?? [];
+  }, [activeEntries.length, activeEntries.map(e => e.id).join(','), pausedEntries.length]);
 
   const completedEntries: TimesheetEntry[] =
     day?.entries.filter(e => e.status === 'completed') ?? [];
 
   const completedMinutes = completedEntries.reduce((s, e) => s + e.roundedMinutes, 0);
-  const activeMinutes = activeEntry ? Math.round(elapsed / 60) : 0;
+  const activeMinutes = activeEntries.reduce((sum, e) => sum + Math.round((elapsedMap[e.id] ?? 0) / 60), 0);
   const totalMinutes = completedMinutes + activeMinutes;
   const TARGET = 420;
   const progressPct = Math.min(100, (totalMinutes / TARGET) * 100);
 
-  async function handlePause() {
-    if (!day || !activeEntry) return;
-    // Save description + activity before pausing, so unsaved local edits aren't lost
-    await api.updateEntry(currentDate, activeEntry.id, {
-      description: activeEntry.description,
-      activityId: activeEntry.activityId,
+  async function handlePause(entry: TimesheetEntry) {
+    if (!day) return;
+    await api.updateEntry(currentDate, entry.id, {
+      description: entry.description,
+      activityId: entry.activityId,
     });
-    await api.pauseEntry(currentDate, activeEntry.id);
-    await refresh();
+    await api.pauseEntry(currentDate, entry.id);
+    await refresh(true);
   }
 
-  async function handleFinish() {
-    if (!day || !activeEntry) return;
-    // Save description + activity before completing, so unsaved local edits aren't lost
-    await api.updateEntry(currentDate, activeEntry.id, {
-      description: activeEntry.description,
-      activityId: activeEntry.activityId,
+  async function handleFinish(entry: TimesheetEntry) {
+    if (!day) return;
+    await api.updateEntry(currentDate, entry.id, {
+      description: entry.description,
+      activityId: entry.activityId,
     });
-    await api.updateEntry(currentDate, activeEntry.id, { status: 'completed' });
-    await refresh();
+    await api.updateEntry(currentDate, entry.id, { status: 'completed' });
+    await refresh(true);
   }
 
   async function handleResume(id: string) {
     await api.resumeEntry(currentDate, id);
-    await refresh();
+    await refresh(true);
+  }
+
+  async function handleDuplicate(entry: TimesheetEntry) {
+    await api.createEntry(currentDate, {
+      activityId: entry.activityId,
+      description: entry.description,
+    });
+    await refresh(true);
   }
 
   async function handleDeleteEntry(id: string) {
     await api.deleteEntry(currentDate, id);
-    await refresh();
+    await refresh(true);
   }
 
   async function handleQuickStart() {
     await api.createEntry(currentDate, { activityId: '', description: '' });
-    await refresh();
+    await refresh(true);
   }
 
   function openEditModal(entry: TimesheetEntry) {
@@ -206,10 +246,14 @@ export default function TrackerPage() {
     if (!isNaN(parsedMin) && parsedMin !== editingEntry.roundedMinutes) updates.roundedMinutes = parsedMin;
     if (Object.keys(updates).length > 0) {
       await api.updateEntry(currentDate, editingEntry.id, updates);
-      await refresh();
+      await refresh(true);
     }
     setEditingEntry(null);
   }
+
+  const sortedActivities = [...activities.activities]
+    .map(a => ({ ...a, label: activityOptionLabel(a, customers.customers) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   if (!day) return <div className="text-center text-muted-foreground py-12">Chargement...</div>;
 
@@ -242,62 +286,64 @@ export default function TrackerPage() {
         </p>
       </div>
 
-      {/* ===== Active Task ===== */}
-      {activeEntry && (
+      {/* ===== Active Tasks ===== */}
+      {activeEntries.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-lg font-semibold">En cours</h2>
-          <Card className="border-primary bg-primary/5 gap-4 py-5">
-            <CardContent className="space-y-3">
-              <select
-                className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-                value={activeEntry.activityId}
-                onChange={async (e) => {
-                  await api.updateEntry(currentDate, activeEntry.id, { activityId: e.target.value });
-                  await refresh();
-                }}
-              >
-                <option value="">-- Activité --</option>
-                {activities.activities.map(a => (
-                  <option key={a.id} value={a.id}>{activityOptionLabel(a, customers.customers)}</option>
-                ))}
-              </select>
-              <Input
-                placeholder="Description..."
-                value={activeEntry.description}
-                onChange={async (e) => {
-                  setDay(prev => {
-                    if (!prev) return prev;
-                    return {
-                      ...prev,
-                      entries: prev.entries.map(entry =>
-                        entry.id === activeEntry.id ? { ...entry, description: e.target.value } : entry
-                      ),
-                    };
-                  });
-                }}
-                onBlur={async (e) => {
-                  await api.updateEntry(currentDate, activeEntry.id, { description: e.target.value });
-                }}
-              />
-              <div className="font-mono text-4xl font-semibold text-primary text-center tabular-nums tracking-wide py-1">
-                {formatTimer(elapsed)}
-              </div>
-              <div className="flex gap-2 justify-center">
-                <Button variant="outline" onClick={handlePause}>
-                  <Pause className="h-4 w-4" />
-                  Pause
-                </Button>
-                <Button onClick={handleFinish}>
-                  <Square className="h-4 w-4" />
-                  Terminer
-                </Button>
-                <Button variant="destructive" onClick={() => handleDeleteEntry(activeEntry.id)}>
-                  <Trash2 className="h-4 w-4" />
-                  Annuler
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          {activeEntries.map(entry => (
+            <Card key={entry.id} className="border-primary bg-primary/5 gap-4 py-5">
+              <CardContent className="space-y-3">
+                <select
+                  className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                  value={entry.activityId}
+                  onChange={async (e) => {
+                    await api.updateEntry(currentDate, entry.id, { activityId: e.target.value });
+                    await refresh(true);
+                  }}
+                >
+                  <option value="">-- Activité --</option>
+                  {sortedActivities.map(a => (
+                    <option key={a.id} value={a.id}>{a.label}</option>
+                  ))}
+                </select>
+                <Input
+                  placeholder="Description..."
+                  value={entry.description}
+                  onChange={async (e) => {
+                    setDay(prev => {
+                      if (!prev) return prev;
+                      return {
+                        ...prev,
+                        entries: prev.entries.map(ent =>
+                          ent.id === entry.id ? { ...ent, description: e.target.value } : ent
+                        ),
+                      };
+                    });
+                  }}
+                  onBlur={async (e) => {
+                    await api.updateEntry(currentDate, entry.id, { description: e.target.value });
+                  }}
+                />
+                <div className="font-mono text-4xl font-semibold text-primary text-center tabular-nums tracking-wide py-1">
+                  {formatTimer(elapsedMap[entry.id] ?? 0)}
+                </div>
+                <div className="flex gap-2 justify-center">
+                  <Button variant="outline" onClick={() => handlePause(entry)}>
+                    <Pause className="h-4 w-4" />
+                    Pause
+                  </Button>
+                  <Button onClick={() => handleFinish(entry)}>
+                    <Square className="h-4 w-4" />
+                    Terminer
+                  </Button>
+                  <Button variant="destructive" onClick={() => handleDeleteEntry(entry.id)}>
+                    <Trash2 className="h-4 w-4" />
+                    Annuler
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </section>
       )}
 
@@ -384,7 +430,7 @@ export default function TrackerPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      <Button variant="outline" size="icon-xs" onClick={() => handleResume(entry.id)} title="Relancer">
+                      <Button variant="outline" size="icon-xs" onClick={() => handleDuplicate(entry)} title="Relancer">
                         <RotateCcw className="h-3 w-3" />
                       </Button>
                       <Button variant="destructive" size="icon-xs" onClick={() => handleDeleteEntry(entry.id)} title="Supprimer">
@@ -414,8 +460,8 @@ export default function TrackerPage() {
                 onChange={e => setEditActivityId(e.target.value)}
               >
                 <option value="">-- Activité --</option>
-                {activities.activities.map(a => (
-                  <option key={a.id} value={a.id}>{activityOptionLabel(a, customers.customers)}</option>
+                {sortedActivities.map(a => (
+                  <option key={a.id} value={a.id}>{a.label}</option>
                 ))}
               </select>
             </div>

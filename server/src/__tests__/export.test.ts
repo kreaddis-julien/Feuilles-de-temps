@@ -36,7 +36,7 @@ describe('Export API', () => {
           status: 'completed',
         },
       ],
-      activeEntry: null,
+      activeEntries: [],
       pausedEntries: [],
     });
   });

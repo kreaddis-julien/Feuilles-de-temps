@@ -11,7 +11,7 @@
     "build:server": "bun build server/src/index.ts --compile --outfile src-tauri/timesheet-server-aarch64-apple-darwin",
     "dev:tauri": "cargo tauri dev",
     "build:tauri": "bun run build:server && cargo tauri build",
-    "install:tauri": "pkill -f 'Feuilles de temps' || true; sleep 1; cp -R 'src-tauri/target/release/bundle/macos/Feuilles de temps.app' /Applications/ && open '/Applications/Feuilles de temps.app'"
+    "install:tauri": "pkill -f 'Tempo' || true; sleep 1; cp -R 'src-tauri/target/release/bundle/macos/Tempo.app' /Applications/ && open '/Applications/Tempo.app'"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

@@ -3,6 +3,7 @@ dist/
 data/
 exports/
 .env
+.DS_Store
 .worktrees/
 src-tauri/target/
 src-tauri/binaries/

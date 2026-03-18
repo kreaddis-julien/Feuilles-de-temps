@@ -50,11 +50,11 @@ cd server && bunx vitest src/__tests__/timesheet.test.ts
 
 - **Projects:** `{ id, name, category: 'client'|'interne'|'support', tasks: [{ id, name }] }`
 - **Timesheet entries:** `{ id, projectId, taskId, description, segments: [{ start, end }], totalMinutes, roundedMinutes, status: 'active'|'paused'|'completed' }`
-- **Day file:** `{ date, entries[], activeEntry: id|null, pausedEntries: id[] }`
+- **Day file:** `{ date, entries[], activeEntries: id[], pausedEntries: id[] }`
 
 ## Business Rules
 
 - Time rounded up to nearest 15 minutes on completion
-- One active timer at a time; creating a new entry auto-pauses the current one
+- Multiple timers can run simultaneously; manual pause/resume supported
 - Paused entries form a LIFO stack (interruptions can nest)
 - Timer survives browser refresh (computed from stored timestamps, not intervals)

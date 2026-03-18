@@ -40,7 +40,7 @@ describe('Storage', () => {
       const data = await storage.loadTimesheet('2026-02-20');
       expect(data.date).toBe('2026-02-20');
       expect(data.entries).toEqual([]);
-      expect(data.activeEntry).toBeNull();
+      expect(data.activeEntries).toEqual([]);
       expect(data.pausedEntries).toEqual([]);
     });
 
@@ -48,7 +48,7 @@ describe('Storage', () => {
       const day = {
         date: '2026-02-20',
         entries: [],
-        activeEntry: null,
+        activeEntries: [],
         pausedEntries: [],
       };
       await storage.saveTimesheet(day);
