@@ -12,7 +12,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { ChevronLeft, ChevronRight, Play, Pause, Square, Trash2, RotateCcw, CalendarDays } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Pause, CircleStop, Trash2, RotateCcw, CalendarDays } from 'lucide-react';
 
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
 
@@ -329,7 +329,7 @@ export default function TrackerPage() {
                     Pause
                   </Button>
                   <Button onClick={() => handleFinish(entry)}>
-                    <Square className="h-4 w-4" />
+                    <CircleStop className="h-4 w-4" />
                     Terminer
                   </Button>
                   <Button variant="destructive" onClick={() => handleDeleteEntry(entry.id)}>

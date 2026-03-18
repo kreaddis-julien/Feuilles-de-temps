@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData } from '../types';
 import * as api from '../api';
-import { Play, Pause, Square, Trash2, Plus, X, Clock, ChevronLeft } from 'lucide-react';
+import { Play, Pause, CircleStop, Trash2, Plus, X, Clock, ChevronLeft } from 'lucide-react';
 
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
 
@@ -315,7 +315,7 @@ export default function TrayPopupPage() {
                   disabled={loading}
                   className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold border border-border bg-card hover:bg-accent transition-all duration-150 disabled:opacity-50"
                 >
-                  <Square className="h-3.5 w-3.5" /> Terminer
+                  <CircleStop className="h-3.5 w-3.5" /> Terminer
                 </button>
               </>
             ) : (
@@ -408,7 +408,7 @@ export default function TrayPopupPage() {
                     disabled={loading}
                     className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-all duration-150 disabled:opacity-50"
                   >
-                    <Square className="h-4 w-4" />
+                    <CircleStop className="h-4 w-4" />
                     Terminer
                   </button>
                 </div>
