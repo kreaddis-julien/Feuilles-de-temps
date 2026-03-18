@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { TimesheetDay, TimesheetEntry, ActivitiesData } from '../types';
+import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData } from '../types';
 import * as api from '../api';
 import { Play, Pause, Square, Trash2, Plus, X, Clock } from 'lucide-react';
 
@@ -73,6 +73,11 @@ function entryLabel(entry: TimesheetEntry, activities: ActivitiesData): string {
   return 'Timer';
 }
 
+function activityOptionLabel(activity: { name: string; customerId: string }, customersList: { id: string; name: string }[]): string {
+  const customer = customersList.find(c => c.id === activity.customerId);
+  return customer ? `${customer.name} - ${activity.name}` : activity.name;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -80,7 +85,8 @@ function entryLabel(entry: TimesheetEntry, activities: ActivitiesData): string {
 export default function TrayPopupPage() {
   const [day, setDay] = useState<TimesheetDay | null>(null);
   const [activities, setActivities] = useState<ActivitiesData>({ activities: [] });
-  const [elapsed, setElapsed] = useState(0);
+  const [customers, setCustomers] = useState<CustomersData>({ customers: [] });
+  const [elapsedMap, setElapsedMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [currentDate] = useState(todayStr);
   const [showNewTimer, setShowNewTimer] = useState(false);
@@ -100,9 +106,10 @@ export default function TrayPopupPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [t, a] = await Promise.all([api.getTimesheet(currentDate), api.getActivities()]);
+      const [t, a, c] = await Promise.all([api.getTimesheet(currentDate), api.getActivities(), api.getCustomers()]);
       setDay(t);
       setActivities(a);
+      setCustomers(c);
     } catch { /* ignore */ }
   }, [currentDate]);
 
@@ -112,7 +119,10 @@ export default function TrayPopupPage() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  const activeEntry = day?.entries.find(e => e.id === day.activeEntry);
+  const activeEntries: TimesheetEntry[] =
+    day?.activeEntries
+      ?.map(id => day.entries.find(e => e.id === id))
+      .filter((e): e is TimesheetEntry => !!e) ?? [];
   const pausedEntries: TimesheetEntry[] =
     day?.pausedEntries
       .map(id => day.entries.find(e => e.id === id))
@@ -120,63 +130,69 @@ export default function TrayPopupPage() {
 
   // Elapsed ticker
   useEffect(() => {
-    if (!activeEntry) {
-      setElapsed(0);
-      updateTrayTitle('');
+    if (activeEntries.length === 0) {
+      setElapsedMap({});
+      if (pausedEntries.length > 0) {
+        updateTrayTitle('⏸');
+      } else {
+        updateTrayTitle('');
+      }
       return;
     }
-    const compute = () => computeElapsedSeconds(activeEntry);
-    const initial = compute();
-    setElapsed(initial);
-    updateTrayTitle(formatTimer(initial));
-    const id = setInterval(() => {
-      const secs = compute();
-      setElapsed(secs);
-      updateTrayTitle(formatTimer(secs));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [activeEntry]);
-
-  useEffect(() => {
-    if (pausedEntries.length > 0 && !activeEntry) {
-      updateTrayTitle('⏸');
+    function tick() {
+      const map: Record<string, number> = {};
+      for (const entry of activeEntries) {
+        map[entry.id] = computeElapsedSeconds(entry);
+      }
+      setElapsedMap(map);
+      if (activeEntries.length === 1) {
+        updateTrayTitle(formatTimer(map[activeEntries[0].id] ?? 0));
+      } else {
+        updateTrayTitle(`${activeEntries.length} actifs`);
+      }
     }
-  }, [pausedEntries.length, activeEntry]);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [activeEntries.length, activeEntries.map(e => e.id).join(','), pausedEntries.length]);
+
+  // Close popup when window loses focus
+  useEffect(() => {
+    const handleBlur = () => {
+      if (isTauri) {
+        invoke('close_tray_popup').catch(() => {});
+      }
+    };
+    window.addEventListener('blur', handleBlur);
+    return () => window.removeEventListener('blur', handleBlur);
+  }, []);
 
   async function close() {
     await invoke('close_tray_popup').catch(() => {});
   }
 
-  async function handlePause() {
-    if (!activeEntry) return;
+  async function handlePause(entry: TimesheetEntry) {
     setLoading(true);
     try {
-      await api.pauseEntry(currentDate, activeEntry.id);
+      await api.pauseEntry(currentDate, entry.id);
       await refresh();
-      await updateTrayTitle('⏸');
-    }
-    finally { setLoading(false); }
-  }
-
-  async function handleFinish() {
-    if (!activeEntry) return;
-    setLoading(true);
-    try {
-      await api.updateEntry(currentDate, activeEntry.id, { status: 'completed' });
-      await refresh();
-      await updateTrayTitle('');
     } finally { setLoading(false); }
   }
 
-  async function handleCancel() {
-    if (!activeEntry) return;
+  async function handleFinish(entry: TimesheetEntry) {
     setLoading(true);
     try {
-      await api.deleteEntry(currentDate, activeEntry.id);
+      await api.updateEntry(currentDate, entry.id, { status: 'completed' });
       await refresh();
-      await updateTrayTitle('');
-    }
-    finally { setLoading(false); }
+    } finally { setLoading(false); }
+  }
+
+  async function handleCancel(entry: TimesheetEntry) {
+    setLoading(true);
+    try {
+      await api.deleteEntry(currentDate, entry.id);
+      await refresh();
+    } finally { setLoading(false); }
   }
 
   async function handleResume(id: string) {
@@ -208,6 +224,10 @@ export default function TrayPopupPage() {
     } finally { setLoading(false); }
   }
 
+  const sortedActivities = [...activities.activities]
+    .map(a => ({ ...a, label: activityOptionLabel(a, customers.customers) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
   return (
     <div
       className="flex flex-col h-screen bg-popover text-foreground select-none overflow-hidden"
@@ -233,63 +253,58 @@ export default function TrayPopupPage() {
 
       <div className="flex-1 overflow-y-auto">
         {/* ── Active timer ────────────────────────────────────────────────── */}
-        {activeEntry ? (
-          <div className="p-4 border-b border-border">
-            {/* Activity name */}
-            <div className="flex items-center gap-2 mb-1">
-              <span className="relative flex h-2 w-2 shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-              </span>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">En cours</p>
-            </div>
-            <p className="text-sm font-semibold truncate mb-4 mt-1 text-foreground">
-              {entryLabel(activeEntry, activities)}
-            </p>
+        {activeEntries.length > 0 ? (
+          <div>
+            {activeEntries.map(entry => (
+              <div key={entry.id} className="p-4 border-b border-border">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                  </span>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">En cours</p>
+                </div>
+                <p className="text-sm font-semibold truncate mb-4 mt-1 text-foreground">
+                  {entryLabel(entry, activities)}
+                </p>
 
-            {/* Big clock */}
-            <div className="flex justify-center mb-5">
-              <div className="relative">
-                <div
-                  className="absolute inset-0 rounded-2xl opacity-20"
-                  style={{ background: 'var(--color-primary)', filter: 'blur(20px)' }}
-                />
-                <span
-                  className="relative font-mono text-5xl font-bold tabular-nums tracking-tight text-foreground"
-                  style={{ letterSpacing: '-0.02em' }}
-                >
-                  {formatTimer(elapsed)}
-                </span>
+                <div className="flex justify-center mb-5">
+                  <span
+                    className="font-mono text-5xl font-bold tabular-nums tracking-tight text-foreground"
+                    style={{ letterSpacing: '-0.02em' }}
+                  >
+                    {formatTimer(elapsedMap[entry.id] ?? 0)}
+                  </span>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handlePause(entry)}
+                    disabled={loading}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold border border-border bg-card hover:bg-accent transition-all duration-150 disabled:opacity-50"
+                  >
+                    <Pause className="h-4 w-4" />
+                    Pause
+                  </button>
+                  <button
+                    onClick={() => handleFinish(entry)}
+                    disabled={loading}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-all duration-150 disabled:opacity-50"
+                  >
+                    <Square className="h-4 w-4" />
+                    Terminer
+                  </button>
+                  <button
+                    onClick={() => handleCancel(entry)}
+                    disabled={loading}
+                    title="Annuler"
+                    className="flex items-center justify-center p-2.5 rounded-xl border border-destructive/30 text-destructive hover:bg-destructive/10 transition-all duration-150 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-            </div>
-
-            {/* Control buttons */}
-            <div className="flex gap-2">
-              <button
-                onClick={handlePause}
-                disabled={loading}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold border border-border bg-card hover:bg-accent transition-all duration-150 disabled:opacity-50"
-              >
-                <Pause className="h-4 w-4" />
-                Pause
-              </button>
-              <button
-                onClick={handleFinish}
-                disabled={loading}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-all duration-150 disabled:opacity-50"
-              >
-                <Square className="h-4 w-4" />
-                Terminer
-              </button>
-              <button
-                onClick={handleCancel}
-                disabled={loading}
-                title="Annuler"
-                className="flex items-center justify-center p-2.5 rounded-xl border border-destructive/30 text-destructive hover:bg-destructive/10 transition-all duration-150 disabled:opacity-50"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
+            ))}
           </div>
         ) : (
           <div className="px-4 py-6 text-center border-b border-border">
@@ -378,8 +393,8 @@ export default function TrayPopupPage() {
                   className="w-full rounded-lg border border-border bg-card px-2.5 py-2 text-sm"
                 >
                   <option value="">Aucune</option>
-                  {activities.activities.map(a => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
+                  {sortedActivities.map(a => (
+                    <option key={a.id} value={a.id}>{a.label}</option>
                   ))}
                 </select>
               </div>
