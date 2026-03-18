@@ -23,7 +23,7 @@ describe('Timesheet API', () => {
     const res = await request(app).get(`/api/timesheet/${DATE}`);
     expect(res.status).toBe(200);
     expect(res.body.entries).toEqual([]);
-    expect(res.body.activeEntry).toBeNull();
+    expect(res.body.activeEntries).toHaveLength(0);
   });
 
   it('POST creates entry and starts timer', async () => {
@@ -37,21 +37,21 @@ describe('Timesheet API', () => {
     expect(entry.status).toBe('active');
     expect(entry.segments).toHaveLength(1);
     expect(entry.segments[0].end).toBeNull();
-    expect(res.body.activeEntry).toBe(entry.id);
+    expect(res.body.activeEntries).toContain(entry.id);
   });
 
   it('POST /pause pauses active entry', async () => {
     const create = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
       .send({ activityId: 'p1',  description: 'W' });
-    const entryId = create.body.activeEntry;
+    const entryId = create.body.activeEntries[0];
     const res = await request(app)
       .post(`/api/timesheet/${DATE}/entries/${entryId}/pause`);
     expect(res.status).toBe(200);
     const entry = res.body.entries.find((e: any) => e.id === entryId);
     expect(entry.status).toBe('paused');
     expect(entry.segments[0].end).not.toBeNull();
-    expect(res.body.activeEntry).toBeNull();
+    expect(res.body.activeEntries).toHaveLength(0);
     expect(res.body.pausedEntries).toContain(entryId);
   });
 
@@ -59,7 +59,7 @@ describe('Timesheet API', () => {
     const create = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
       .send({ activityId: 'p1',  description: 'W' });
-    const entryId = create.body.activeEntry;
+    const entryId = create.body.activeEntries[0];
     await request(app)
       .post(`/api/timesheet/${DATE}/entries/${entryId}/pause`);
     const res = await request(app)
@@ -69,30 +69,47 @@ describe('Timesheet API', () => {
     expect(entry.status).toBe('active');
     expect(entry.segments).toHaveLength(2);
     expect(entry.segments[1].end).toBeNull();
-    expect(res.body.activeEntry).toBe(entryId);
+    expect(res.body.activeEntries).toContain(entryId);
     expect(res.body.pausedEntries).not.toContain(entryId);
   });
 
-  it('interrupt workflow: new entry pauses current', async () => {
+  it('parallel timers: new entry does not pause existing active', async () => {
     const a = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
-      .send({ activityId: 'p1',  description: 'Task A' });
-    const idA = a.body.activeEntry;
+      .send({ activityId: 'p1', description: 'Task A' });
+    const idA = a.body.activeEntries[0];
+
     const b = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
-      .send({ activityId: 'p2',  description: 'Interrupt B' });
-    const idB = b.body.activeEntry;
-    expect(idB).not.toBe(idA);
+      .send({ activityId: 'p2', description: 'Task B' });
+
+    expect(b.body.activeEntries).toHaveLength(2);
+    expect(b.body.activeEntries).toContain(idA);
     const entryA = b.body.entries.find((e: any) => e.id === idA);
-    expect(entryA.status).toBe('paused');
-    expect(b.body.pausedEntries).toContain(idA);
+    expect(entryA.status).toBe('active');
+  });
+
+  it('pause one of multiple active entries', async () => {
+    const a = await request(app)
+      .post(`/api/timesheet/${DATE}/entries`)
+      .send({ activityId: 'p1', description: 'Task A' });
+    const b = await request(app)
+      .post(`/api/timesheet/${DATE}/entries`)
+      .send({ activityId: 'p2', description: 'Task B' });
+    const idA = a.body.activeEntries[0];
+
+    const res = await request(app)
+      .post(`/api/timesheet/${DATE}/entries/${idA}/pause`);
+    expect(res.body.activeEntries).not.toContain(idA);
+    expect(res.body.activeEntries).toHaveLength(1);
+    expect(res.body.pausedEntries).toContain(idA);
   });
 
   it('PATCH updates entry description', async () => {
     const create = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
       .send({ activityId: 'p1',  description: 'Old' });
-    const entryId = create.body.activeEntry;
+    const entryId = create.body.activeEntries[0];
     const res = await request(app)
       .patch(`/api/timesheet/${DATE}/entries/${entryId}`)
       .send({ description: 'New' });
@@ -104,7 +121,7 @@ describe('Timesheet API', () => {
     const create = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
       .send({ activityId: 'p1',  description: 'W' });
-    const entryId = create.body.activeEntry;
+    const entryId = create.body.activeEntries[0];
     const res = await request(app)
       .patch(`/api/timesheet/${DATE}/entries/${entryId}`)
       .send({ status: 'completed' });
@@ -112,18 +129,18 @@ describe('Timesheet API', () => {
     expect(entry.status).toBe('completed');
     expect(entry.segments[0].end).not.toBeNull();
     expect(entry.roundedMinutes % 15).toBe(0);
-    expect(res.body.activeEntry).toBeNull();
+    expect(res.body.activeEntries).toHaveLength(0);
   });
 
   it('DELETE removes entry', async () => {
     const create = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
       .send({ activityId: 'p1',  description: 'W' });
-    const entryId = create.body.activeEntry;
+    const entryId = create.body.activeEntries[0];
     const res = await request(app)
       .delete(`/api/timesheet/${DATE}/entries/${entryId}`);
     expect(res.status).toBe(200);
     expect(res.body.entries).toHaveLength(0);
-    expect(res.body.activeEntry).toBeNull();
+    expect(res.body.activeEntries).toHaveLength(0);
   });
 });
