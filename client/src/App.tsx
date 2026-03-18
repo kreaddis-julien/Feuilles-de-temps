@@ -76,7 +76,7 @@ function AppInner() {
               }`
             }
           >
-            Feuilles de temps
+            Tempo
           </NavLink>
           <NavLink
             to="/stats"

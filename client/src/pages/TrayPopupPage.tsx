@@ -240,7 +240,7 @@ export default function TrayPopupPage() {
       >
         <div className="flex items-center gap-2">
           <Clock className="h-4 w-4 text-primary" />
-          <span className="text-sm font-semibold text-foreground">Feuilles de temps</span>
+          <span className="text-sm font-semibold text-foreground">Tempo</span>
         </div>
         <button
           onClick={close}
