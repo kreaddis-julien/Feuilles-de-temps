@@ -77,8 +77,11 @@ export default function NavTimerWidget() {
   const [currentDate, setCurrentDate] = useState(todayStr);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const refresh = useCallback(async (date?: string) => {
-    const d = date ?? currentDate;
+  const syncChannel = useRef(new BroadcastChannel('tempo-sync'));
+
+  const refresh = useCallback(async (dateOrNotify?: string | boolean) => {
+    const notify = typeof dateOrNotify === 'boolean' ? dateOrNotify : false;
+    const d = typeof dateOrNotify === 'string' ? dateOrNotify : currentDate;
     try {
       const [t, a, c] = await Promise.all([
         api.getTimesheet(d),
@@ -88,6 +91,7 @@ export default function NavTimerWidget() {
       setDay(t);
       setActivities(a);
       setCustomers(c);
+      if (notify) syncChannel.current.postMessage('refresh');
     } catch {
       // silently ignore errors (server might not be ready)
     }
@@ -104,7 +108,10 @@ export default function NavTimerWidget() {
     return () => clearInterval(id);
   }, []);
 
-  // Poll every 5s
+  // Listen for cross-window sync + poll as fallback
+  useEffect(() => {
+    syncChannel.current.onmessage = () => refresh();
+  }, [refresh]);
   useEffect(() => {
     refresh();
     const id = setInterval(refresh, 5000);
@@ -151,7 +158,7 @@ export default function NavTimerWidget() {
     setLoading(true);
     try {
       await api.pauseEntry(currentDate, entry.id);
-      await refresh();
+      await refresh(true);
     } finally { setLoading(false); }
   }
 
@@ -160,7 +167,7 @@ export default function NavTimerWidget() {
     setLoading(true);
     try {
       await api.updateEntry(currentDate, entry.id, { status: 'completed' });
-      await refresh();
+      await refresh(true);
     } finally { setLoading(false); }
   }
 
@@ -169,7 +176,7 @@ export default function NavTimerWidget() {
     setLoading(true);
     try {
       await api.deleteEntry(currentDate, entry.id);
-      await refresh();
+      await refresh(true);
     } finally { setLoading(false); }
   }
 
@@ -177,7 +184,7 @@ export default function NavTimerWidget() {
     setLoading(true);
     try {
       await api.resumeEntry(currentDate, id);
-      await refresh();
+      await refresh(true);
     } finally { setLoading(false); }
   }
 
@@ -185,7 +192,7 @@ export default function NavTimerWidget() {
     setLoading(true);
     try {
       await api.createEntry(currentDate, { activityId: '', description: '' });
-      await refresh();
+      await refresh(true);
     } finally { setLoading(false); }
   }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData } from '../types';
 import * as api from '../api';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,6 @@ async function updateTrayTitle(text: string) {
     await invoke('set_tray_title', { title: text });
   } catch { /* ignore outside Tauri */ }
 }
-
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -105,7 +104,9 @@ export default function TrackerPage() {
   const [editDescription, setEditDescription] = useState('');
   const [editMinutes, setEditMinutes] = useState('');
 
-  const refresh = useCallback(async () => {
+  const syncChannel = useRef(new BroadcastChannel('tempo-sync'));
+
+  const refresh = useCallback(async (notify = false) => {
     const [t, a, c] = await Promise.all([
       api.getTimesheet(currentDate),
       api.getActivities(),
@@ -114,9 +115,14 @@ export default function TrackerPage() {
     setDay(t);
     setActivities(a);
     setCustomers(c);
+    if (notify) syncChannel.current.postMessage('refresh');
   }, [currentDate]);
 
   useEffect(() => { refresh(); }, [refresh]);
+  // Listen for cross-window sync events (from popup/navbar)
+  useEffect(() => {
+    syncChannel.current.onmessage = () => refresh();
+  }, [refresh]);
   useEffect(() => { localStorage.setItem('trackerDate', currentDate); }, [currentDate]);
 
   function shiftDate(offset: number) {
@@ -132,10 +138,15 @@ export default function TrackerPage() {
       ?.map(id => day.entries.find(e => e.id === id))
       .filter((e): e is TimesheetEntry => !!e) ?? [];
 
+  const pausedEntries: TimesheetEntry[] =
+    day?.pausedEntries
+      .map(id => day.entries.find(e => e.id === id))
+      .filter((e): e is TimesheetEntry => !!e) ?? [];
+
   useEffect(() => {
     if (activeEntries.length === 0) {
       setElapsedMap({});
-      updateTrayTitle('');
+      updateTrayTitle(pausedEntries.length > 0 ? '⏸' : '');
       return;
     }
     function computeElapsedSeconds(entry: TimesheetEntry): number {
@@ -165,13 +176,7 @@ export default function TrackerPage() {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [activeEntries.length, activeEntries.map(e => e.id).join(',')]);
-
-
-  const pausedEntries: TimesheetEntry[] =
-    day?.pausedEntries
-      .map(id => day.entries.find(e => e.id === id))
-      .filter((e): e is TimesheetEntry => !!e) ?? [];
+  }, [activeEntries.length, activeEntries.map(e => e.id).join(','), pausedEntries.length]);
 
   const completedEntries: TimesheetEntry[] =
     day?.entries.filter(e => e.status === 'completed') ?? [];
@@ -189,7 +194,7 @@ export default function TrackerPage() {
       activityId: entry.activityId,
     });
     await api.pauseEntry(currentDate, entry.id);
-    await refresh();
+    await refresh(true);
   }
 
   async function handleFinish(entry: TimesheetEntry) {
@@ -199,22 +204,30 @@ export default function TrackerPage() {
       activityId: entry.activityId,
     });
     await api.updateEntry(currentDate, entry.id, { status: 'completed' });
-    await refresh();
+    await refresh(true);
   }
 
   async function handleResume(id: string) {
     await api.resumeEntry(currentDate, id);
-    await refresh();
+    await refresh(true);
+  }
+
+  async function handleDuplicate(entry: TimesheetEntry) {
+    await api.createEntry(currentDate, {
+      activityId: entry.activityId,
+      description: entry.description,
+    });
+    await refresh(true);
   }
 
   async function handleDeleteEntry(id: string) {
     await api.deleteEntry(currentDate, id);
-    await refresh();
+    await refresh(true);
   }
 
   async function handleQuickStart() {
     await api.createEntry(currentDate, { activityId: '', description: '' });
-    await refresh();
+    await refresh(true);
   }
 
   function openEditModal(entry: TimesheetEntry) {
@@ -233,7 +246,7 @@ export default function TrackerPage() {
     if (!isNaN(parsedMin) && parsedMin !== editingEntry.roundedMinutes) updates.roundedMinutes = parsedMin;
     if (Object.keys(updates).length > 0) {
       await api.updateEntry(currentDate, editingEntry.id, updates);
-      await refresh();
+      await refresh(true);
     }
     setEditingEntry(null);
   }
@@ -285,7 +298,7 @@ export default function TrackerPage() {
                   value={entry.activityId}
                   onChange={async (e) => {
                     await api.updateEntry(currentDate, entry.id, { activityId: e.target.value });
-                    await refresh();
+                    await refresh(true);
                   }}
                 >
                   <option value="">-- Activité --</option>
@@ -417,7 +430,7 @@ export default function TrackerPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      <Button variant="outline" size="icon-xs" onClick={() => handleResume(entry.id)} title="Relancer">
+                      <Button variant="outline" size="icon-xs" onClick={() => handleDuplicate(entry)} title="Relancer">
                         <RotateCcw className="h-3 w-3" />
                       </Button>
                       <Button variant="destructive" size="icon-xs" onClick={() => handleDeleteEntry(entry.id)} title="Supprimer">

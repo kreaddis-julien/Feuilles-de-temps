@@ -7,6 +7,9 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_shell::ShellExt;
 
+#[cfg(target_os = "macos")]
+use tauri_nspanel::{ManagerExt as NSPanelManagerExt, WebviewWindowExt};
+
 struct SidecarChild(std::sync::Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
 
 // ── Tauri commands callable from the frontend ──────────────────────────────
@@ -15,14 +18,29 @@ struct SidecarChild(std::sync::Mutex<Option<tauri_plugin_shell::process::Command
 #[tauri::command]
 fn set_tray_title(app: tauri::AppHandle, title: String) {
     if let Some(tray) = app.tray_by_id("main-tray") {
-        let display = if title.is_empty() { None } else { Some(title.as_str()) };
-        let _ = tray.set_title(display);
+        let display = if title.is_empty() {
+            None
+        } else {
+            // Add leading space for visual separation from tray icon
+            Some(format!(" {}", title))
+        };
+        let _ = tray.set_title(display.as_deref());
     }
 }
 
 /// Toggle the tray popup window visibility
 #[tauri::command]
 fn toggle_tray_popup(app: tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    if let Ok(panel) = app.get_webview_panel("tray-popup") {
+        if panel.is_visible() {
+            panel.order_out(None);
+        } else {
+            panel.show();
+        }
+        return;
+    }
+    // Fallback for non-macOS
     if let Some(popup) = app.get_webview_window("tray-popup") {
         if popup.is_visible().unwrap_or(false) {
             let _ = popup.hide();
@@ -36,6 +54,11 @@ fn toggle_tray_popup(app: tauri::AppHandle) {
 /// Close the tray popup
 #[tauri::command]
 fn close_tray_popup(app: tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    if let Ok(panel) = app.get_webview_panel("tray-popup") {
+        panel.order_out(None);
+        return;
+    }
     if let Some(popup) = app.get_webview_window("tray-popup") {
         let _ = popup.hide();
     }
@@ -51,6 +74,7 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_nspanel::init())
         .invoke_handler(tauri::generate_handler![
             set_tray_title,
             toggle_tray_popup,
@@ -133,7 +157,7 @@ pub fn run() {
             }
 
             // ── Tray popup window (small, borderless, hidden at start) ──────
-            let _popup = WebviewWindowBuilder::new(
+            let popup = WebviewWindowBuilder::new(
                 app,
                 "tray-popup",
                 tauri::WebviewUrl::App("index.html#/tray-popup".into()),
@@ -149,6 +173,39 @@ pub fn run() {
             .visible(false)
             .shadow(true)
             .build()?;
+
+            // ── Convert to NSPanel for proper focus handling on macOS ────────
+            #[cfg(target_os = "macos")]
+            {
+
+                let panel = popup.to_panel().unwrap();
+
+                // Set panel level above menu bar
+                let ns_main_menu_window_level: i32 = 24;
+                panel.set_level(ns_main_menu_window_level + 1);
+
+                // Allow panel on all spaces, non-activating so it doesn't steal focus
+                // from other apps in a disruptive way
+                use tauri_nspanel::cocoa::appkit::NSWindowCollectionBehavior;
+                panel.set_collection_behaviour(
+                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+                    | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary,
+                );
+
+                // Set up delegate to hide panel when it loses key window status
+                let app_handle = app.handle().clone();
+                let panel_delegate = tauri_nspanel::panel_delegate!(TrayPanelDelegate {
+                    window_did_resign_key
+                });
+                panel_delegate.set_listener(Box::new(move |delegate_name: String| {
+                    if delegate_name.as_str() == "window_did_resign_key" {
+                        if let Ok(p) = app_handle.get_webview_panel("tray-popup") {
+                            p.order_out(None);
+                        }
+                    }
+                }));
+                panel.set_delegate(panel_delegate);
+            }
 
             // ── System tray ──────────────────────────────────────────────────
             let open_i = MenuItem::with_id(app, "open", "Ouvrir", true, None::<&str>)?;
@@ -169,44 +226,46 @@ pub fn run() {
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
-                        // 1. On passe sur 'Down' : la fenêtre s'ouvre instantanément au clic
-                        // sans risquer d'être annulée par un micro-mouvement de souris.
-                        button_state: MouseButtonState::Down, 
+                        button_state: MouseButtonState::Down,
                         position,
-                        rect, // 👈 Tauri V2 nous donne la position exacte de l'icône !
+                        rect,
                         ..
                     } = event
                     {
                         let app = tray.app_handle();
+
+                        #[cfg(target_os = "macos")]
+                        if let Ok(panel) = app.get_webview_panel("tray-popup") {
+                            if panel.is_visible() {
+                                panel.order_out(None);
+                            } else {
+                                // Position panel under tray icon
+                                if let Some(popup_win) = app.get_webview_window("tray-popup") {
+                                    let scale_factor = popup_win.scale_factor().unwrap_or(2.0);
+                                    let logical_width = 340.0;
+                                    let physical_width = logical_width * scale_factor;
+                                    let rect_size = rect.size.to_physical::<f64>(scale_factor);
+                                    let rect_pos = rect.position.to_physical::<f64>(scale_factor);
+                                    let (tray_x, tray_y) = if rect_size.width > 0.0 && rect_size.height > 0.0 {
+                                        (rect_pos.x + (rect_size.width / 2.0), rect_pos.y + rect_size.height)
+                                    } else {
+                                        (position.x, position.y)
+                                    };
+                                    let x = tray_x - (physical_width / 2.0);
+                                    let y = tray_y + (4.0 * scale_factor);
+                                    let _ = popup_win.set_position(tauri::PhysicalPosition::new(x, y));
+                                }
+                                panel.show();
+                            }
+                            return;
+                        }
+
+                        // Fallback for non-macOS
                         if let Some(popup) = app.get_webview_window("tray-popup") {
                             let visible = popup.is_visible().unwrap_or(false);
                             if visible {
                                 let _ = popup.hide();
                             } else {
-                                // 2. On récupère le "scale factor" (ex: 2.0 sur écran Retina Mac, 1.0 sur moniteur standard)
-                                let scale_factor = popup.scale_factor().unwrap_or(2.0);
-                                let logical_width = 340.0;
-                                let physical_width = logical_width * scale_factor;
-
-                                // --- NOUVEAU CODE CORRIGÉ ---
-                                // On convertit les Enums Tauri en véritables pixels physiques (f64)
-                                let rect_size = rect.size.to_physical::<f64>(scale_factor);
-                                let rect_pos = rect.position.to_physical::<f64>(scale_factor);
-
-                                // 3. On calcule la base de l'icône sur le bon écran
-                                let (tray_x, tray_y) = if rect_size.width > 0.0 && rect_size.height > 0.0 {
-                                    // Milieu horizontal de l'icône, et bas de l'icône
-                                    (rect_pos.x + (rect_size.width / 2.0), rect_pos.y + rect_size.height)
-                                } else {
-                                    (position.x, position.y) // Sécurité si l'icône n'est pas détectée
-                                };
-
-                                // 4. On centre la fenêtre sous l'icône
-                                let x = tray_x - (physical_width / 2.0);
-                                let y = tray_y + (4.0 * scale_factor); // 4px de marge sous le menu
-
-                                // 5. On applique la position nativement
-                                let _ = popup.set_position(tauri::PhysicalPosition::new(x, y));
                                 let _ = popup.show();
                                 let _ = popup.set_focus();
                             }
@@ -248,15 +307,8 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Hide window on close instead of quitting (macOS pattern)
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Popup always hides; main window also hides
                 let _ = window.hide();
                 api.prevent_close();
-            }
-            // Also hide popup when it loses focus
-            if let tauri::WindowEvent::Focused(false) = event {
-                if window.label() == "tray-popup" {
-                    let _ = window.hide();
-                }
             }
         })
         .build(tauri::generate_context!())
