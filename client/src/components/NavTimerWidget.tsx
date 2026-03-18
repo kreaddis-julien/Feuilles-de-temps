@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData } from '../types';
 import * as api from '../api';
-import { Play, Pause, Square, Trash2, Plus, Timer, ChevronDown } from 'lucide-react';
+import { Play, Pause, CircleStop, Trash2, Plus, Timer, ChevronDown } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -293,7 +293,7 @@ export default function NavTimerWidget() {
                       disabled={loading}
                       className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-all duration-150 disabled:opacity-50"
                     >
-                      <Square className="h-3.5 w-3.5" />
+                      <CircleStop className="h-3.5 w-3.5" />
                       Terminer
                     </button>
                     <button
