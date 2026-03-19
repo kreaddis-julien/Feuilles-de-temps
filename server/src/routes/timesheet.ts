@@ -49,6 +49,7 @@ export function createTimesheetRouter(storage: Storage) {
       if (req.body.description !== undefined) entry.description = req.body.description;
       if (req.body.roundedMinutes !== undefined) entry.roundedMinutes = req.body.roundedMinutes;
       if (req.body.activityId !== undefined) entry.activityId = req.body.activityId;
+      if (req.body.deferred !== undefined) entry.deferred = req.body.deferred;
     }
 
     await storage.saveTimesheet(data);

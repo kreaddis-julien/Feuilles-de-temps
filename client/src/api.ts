@@ -1,4 +1,4 @@
-import type { TimesheetDay, ActivitiesData, CustomersData, Customer } from './types';
+import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData, Customer } from './types';
 
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
 export const BASE = isTauri ? 'http://localhost:3001/api' : '/api';
@@ -78,3 +78,7 @@ export interface StatsData {
 
 export const getStats = (from: string, to: string) =>
   json<StatsData>(`/stats?from=${from}&to=${to}`);
+
+// Deferred
+export const getDeferred = () =>
+  json<{ date: string; entry: TimesheetEntry }[]>('/deferred');

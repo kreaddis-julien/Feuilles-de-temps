@@ -8,6 +8,7 @@ import { createActivitiesRouter } from './routes/activities.js';
 import { createTimesheetRouter } from './routes/timesheet.js';
 import { createExportRouter } from './routes/export.js';
 import { createStatsRouter } from './routes/stats.js';
+import { createDeferredRouter } from './routes/deferred.js';
 
 function getLocalIp(): string | null {
   const interfaces = os.networkInterfaces();
@@ -39,6 +40,7 @@ export function createApp(dataDir: string, opts?: { staticDir?: string }) {
   app.use('/api/timesheet', createTimesheetRouter(storage));
   app.use('/api/export', createExportRouter(storage));
   app.use('/api/stats', createStatsRouter(storage));
+  app.use('/api/deferred', createDeferredRouter(storage));
 
   // Serve frontend static files if --static-dir is provided
   if (opts?.staticDir) {
