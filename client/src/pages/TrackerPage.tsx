@@ -12,7 +12,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { ChevronLeft, ChevronRight, Play, Pause, CircleStop, Trash2, RotateCcw, CalendarDays } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Pause, CircleStop, Trash2, RotateCcw, CalendarDays, Clock, Merge } from 'lucide-react';
 
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
 
@@ -27,6 +27,15 @@ async function updateTrayTitle(text: string) {
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
+
+function roundUp15(minutes: number): number {
+  if (minutes === 0) return 0;
+  return Math.ceil(minutes / 15) * 15;
+}
+
+function isManualDuration(entry: TimesheetEntry): boolean {
+  return entry.roundedMinutes !== roundUp15(entry.totalMinutes);
+}
 
 function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -99,6 +108,13 @@ export default function TrackerPage() {
   const [editActivityId, setEditActivityId] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editMinutes, setEditMinutes] = useState('');
+
+  // Merge state
+  const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeUseIndicated, setMergeUseIndicated] = useState<Record<string, boolean>>({});
+  const [mergeActivityId, setMergeActivityId] = useState('');
+  const [mergeDescription, setMergeDescription] = useState('');
 
   const syncChannel = useRef(new BroadcastChannel('tempo-sync'));
 
@@ -213,6 +229,54 @@ export default function TrackerPage() {
       activityId: entry.activityId,
       description: entry.description,
     });
+    await refresh(true);
+  }
+
+  async function handleToggleDeferred(entry: TimesheetEntry) {
+    await api.updateEntry(currentDate, entry.id, { deferred: !entry.deferred });
+    await refresh(true);
+  }
+
+  function toggleMergeSelection(id: string) {
+    setSelectedForMerge(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function openMergeDialog() {
+    const entries = completedEntries.filter(e => selectedForMerge.has(e.id));
+    if (entries.length < 2) return;
+    // Pre-select: use "indicated" if user manually changed the duration
+    const useIndicated: Record<string, boolean> = {};
+    for (const e of entries) {
+      useIndicated[e.id] = isManualDuration(e);
+    }
+    setMergeUseIndicated(useIndicated);
+    setMergeActivityId(entries[0].activityId);
+    setMergeDescription(entries.map(e => e.description).filter(Boolean).join(' / '));
+    setMergeOpen(true);
+  }
+
+  async function handleMerge() {
+    const entries = completedEntries.filter(e => selectedForMerge.has(e.id));
+    if (entries.length < 2) return;
+
+    const totalMins = entries.reduce((sum, e) => {
+      return sum + (mergeUseIndicated[e.id] ? e.roundedMinutes : e.totalMinutes);
+    }, 0);
+
+    await api.mergeEntries(currentDate, {
+      entryIds: entries.map(e => e.id),
+      activityId: mergeActivityId,
+      description: mergeDescription,
+      totalMinutes: totalMins,
+      roundedMinutes: roundUp15(totalMins),
+    });
+
+    setSelectedForMerge(new Set());
+    setMergeOpen(false);
     await refresh(true);
   }
 
@@ -351,10 +415,15 @@ export default function TrackerPage() {
             {pausedEntries.map(entry => (
               <Card key={entry.id} className="border-warning bg-warning/5 py-3 gap-0">
                 <CardContent className="flex items-center justify-between">
-                  <span className="text-sm">
-                    <strong className="font-semibold">{entryLabel(entry, activities.activities, customers.customers)}</strong>
-                    {' '}({formatDuration(entry.totalMinutes)})
-                  </span>
+                  <div className="min-w-0">
+                    <span className="text-sm">
+                      <strong className="font-semibold">{entryLabel(entry, activities.activities, customers.customers)}</strong>
+                      {' '}({formatDuration(entry.totalMinutes)})
+                    </span>
+                    {entry.description && (
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">{entry.description}</p>
+                    )}
+                  </div>
                   <div className="flex gap-1.5">
                     <Button variant="outline" size="sm" onClick={() => handleResume(entry.id)}>
                       <Play className="h-3.5 w-3.5" />
@@ -387,16 +456,26 @@ export default function TrackerPage() {
           <Table className="table-fixed w-full">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[15%]">Client</TableHead>
-                <TableHead className="w-[18%]">Activité</TableHead>
+                <TableHead className="w-8"></TableHead>
+                <TableHead className="w-[14%]">Client</TableHead>
+                <TableHead className="w-[16%]">Activité</TableHead>
                 <TableHead>Description</TableHead>
-                <TableHead className="w-[4.5rem]">Durée</TableHead>
+                <TableHead className="w-[4rem]">Réel</TableHead>
+                <TableHead className="w-[4rem]">Durée</TableHead>
                 <TableHead className="w-[5.5rem]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {completedEntries.map(entry => (
-                <TableRow key={entry.id}>
+                <TableRow key={entry.id} className={entry.deferred ? 'bg-warning/5' : ''}>
+                  <TableCell className="px-1">
+                    <input
+                      type="checkbox"
+                      checked={selectedForMerge.has(entry.id)}
+                      onChange={() => toggleMergeSelection(entry.id)}
+                      className="h-3.5 w-3.5 rounded border-border accent-primary cursor-pointer"
+                    />
+                  </TableCell>
                   <TableCell className="truncate">
                     {resolveCustomerName(entry.activityId, activities.activities, customers.customers) || '—'}
                   </TableCell>
@@ -416,6 +495,9 @@ export default function TrackerPage() {
                       {entry.description || '—'}
                     </span>
                   </TableCell>
+                  <TableCell className="text-xs text-muted-foreground tabular-nums">
+                    {formatDuration(entry.totalMinutes)}
+                  </TableCell>
                   <TableCell>
                     <span
                       className="cursor-pointer border-b border-dashed border-border hover:bg-accent px-1 py-0.5 rounded-sm transition-colors"
@@ -426,6 +508,14 @@ export default function TrackerPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
+                      <Button
+                        variant={entry.deferred ? 'default' : 'outline'}
+                        size="icon-xs"
+                        onClick={() => handleToggleDeferred(entry)}
+                        title={entry.deferred ? 'Reporté — cliquer pour retirer' : 'À reporter'}
+                      >
+                        <Clock className="h-3 w-3" />
+                      </Button>
                       <Button variant="outline" size="icon-xs" onClick={() => handleDuplicate(entry)} title="Relancer">
                         <RotateCcw className="h-3 w-3" />
                       </Button>
@@ -438,8 +528,110 @@ export default function TrackerPage() {
               ))}
             </TableBody>
           </Table>
+          {selectedForMerge.size >= 2 && (
+            <div className="flex items-center justify-between mt-3 p-3 rounded-lg border border-primary/30 bg-primary/5">
+              <span className="text-sm font-medium">{selectedForMerge.size} entrées sélectionnées</span>
+              <Button size="sm" onClick={openMergeDialog}>
+                <Merge className="h-3.5 w-3.5" />
+                Fusionner
+              </Button>
+            </div>
+          )}
         </section>
       )}
+
+      {/* ===== Merge Modal ===== */}
+      <Dialog open={mergeOpen} onOpenChange={(open) => { if (!open) setMergeOpen(false); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Fusionner {selectedForMerge.size} entrées</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Entry list with toggle */}
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {completedEntries.filter(e => selectedForMerge.has(e.id)).map(entry => (
+                <div key={entry.id} className="flex items-center justify-between gap-2 p-2 rounded-lg border border-border bg-card">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{entryLabel(entry, activities.activities, customers.customers)}</p>
+                    {entry.description && <p className="text-xs text-muted-foreground truncate">{entry.description}</p>}
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <button
+                      onClick={() => setMergeUseIndicated(prev => ({ ...prev, [entry.id]: false }))}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                        !mergeUseIndicated[entry.id]
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted text-muted-foreground hover:bg-accent'
+                      }`}
+                    >
+                      Réel: {formatDuration(entry.totalMinutes)}
+                    </button>
+                    <button
+                      onClick={() => setMergeUseIndicated(prev => ({ ...prev, [entry.id]: true }))}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                        mergeUseIndicated[entry.id]
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted text-muted-foreground hover:bg-accent'
+                      }`}
+                    >
+                      Indiqué: {formatDuration(entry.roundedMinutes)}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Total */}
+            <div className="p-3 rounded-lg bg-accent/50 text-center">
+              <p className="text-xs text-muted-foreground mb-1">Durée résultante</p>
+              <p className="text-lg font-bold tabular-nums">
+                {formatDuration(roundUp15(
+                  completedEntries
+                    .filter(e => selectedForMerge.has(e.id))
+                    .reduce((sum, e) => sum + (mergeUseIndicated[e.id] ? e.roundedMinutes : e.totalMinutes), 0)
+                ))}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                ({completedEntries
+                  .filter(e => selectedForMerge.has(e.id))
+                  .reduce((sum, e) => sum + (mergeUseIndicated[e.id] ? e.roundedMinutes : e.totalMinutes), 0)} min réel → arrondi 15min)
+              </p>
+            </div>
+
+            {/* Activity */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-muted-foreground">Activité</label>
+              <select
+                className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                value={mergeActivityId}
+                onChange={e => setMergeActivityId(e.target.value)}
+              >
+                <option value="">-- Activité --</option>
+                {sortedActivities.map(a => (
+                  <option key={a.id} value={a.id}>{a.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Description */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-muted-foreground">Description</label>
+              <Textarea
+                value={mergeDescription}
+                onChange={e => setMergeDescription(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMergeOpen(false)}>Annuler</Button>
+            <Button onClick={handleMerge}>
+              <Merge className="h-4 w-4" />
+              Fusionner
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ===== Edit Modal ===== */}
       <Dialog open={!!editingEntry} onOpenChange={(open) => { if (!open) setEditingEntry(null); }}>

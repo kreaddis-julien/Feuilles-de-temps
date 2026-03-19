@@ -79,6 +79,19 @@ export interface StatsData {
 export const getStats = (from: string, to: string) =>
   json<StatsData>(`/stats?from=${from}&to=${to}`);
 
+// Merge
+export const mergeEntries = (date: string, body: {
+  entryIds: string[];
+  activityId: string;
+  description: string;
+  totalMinutes: number;
+  roundedMinutes: number;
+}) =>
+  json<TimesheetDay>(`/timesheet/${date}/entries/merge`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
 // Deferred
 export const getDeferred = () =>
   json<{ date: string; entry: TimesheetEntry }[]>('/deferred');

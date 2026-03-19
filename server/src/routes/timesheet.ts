@@ -98,5 +98,37 @@ export function createTimesheetRouter(storage: Storage) {
     res.json(data);
   });
 
+  // Merge: create a completed entry and delete originals
+  router.post('/:date/entries/merge', async (req, res) => {
+    const data = await storage.loadTimesheet(req.params.date);
+    const { entryIds, activityId, description, totalMinutes, roundedMinutes } = req.body;
+
+    if (!Array.isArray(entryIds) || entryIds.length < 2) {
+      return res.status(400).json({ error: 'Need at least 2 entry IDs' });
+    }
+
+    // Create merged entry (already completed, no active segments)
+    const now = nowTimestamp();
+    const merged: TimesheetEntry = {
+      id: uuid(),
+      activityId: activityId ?? '',
+      description: description ?? '',
+      segments: [{ start: now, end: now }],
+      totalMinutes: totalMinutes ?? 0,
+      roundedMinutes: roundedMinutes ?? 0,
+      status: 'completed',
+    };
+    data.entries.push(merged);
+
+    // Remove original entries
+    const idsToRemove = new Set(entryIds as string[]);
+    data.entries = data.entries.filter(e => !idsToRemove.has(e.id) || e.id === merged.id);
+    data.activeEntries = data.activeEntries.filter(id => !idsToRemove.has(id));
+    data.pausedEntries = data.pausedEntries.filter(id => !idsToRemove.has(id));
+
+    await storage.saveTimesheet(data);
+    res.status(201).json(data);
+  });
+
   return router;
 }

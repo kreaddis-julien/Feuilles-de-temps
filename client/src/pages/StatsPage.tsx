@@ -8,6 +8,7 @@ import type { StatsData } from '../api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
+import { DatePicker } from '@/components/ui/date-picker';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -229,19 +230,9 @@ export default function StatsPage() {
         </div>
         {period === 'custom' ? (
           <div className="flex items-center gap-2">
-            <input
-              type="date"
-              className="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-              value={customFrom}
-              onChange={e => setCustomFrom(e.target.value)}
-            />
+            <DatePicker value={customFrom} onChange={setCustomFrom} />
             <span className="text-muted-foreground">—</span>
-            <input
-              type="date"
-              className="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-              value={customTo}
-              onChange={e => setCustomTo(e.target.value)}
-            />
+            <DatePicker value={customTo} onChange={setCustomTo} />
           </div>
         ) : (
           <div className="flex items-center gap-4">
