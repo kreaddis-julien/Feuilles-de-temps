@@ -35,6 +35,7 @@ export interface TimesheetEntry {
   totalMinutes: number;
   roundedMinutes: number;
   status: EntryStatus;
+  deferred?: boolean;
 }
 
 export interface TimesheetDay {

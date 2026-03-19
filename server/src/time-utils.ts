@@ -7,9 +7,8 @@ export function roundUp15(minutes: number): number {
 
 export function calcSegmentMinutes(segment: Segment): number {
   if (!segment.end) return 0;
-  return Math.floor(
-    (new Date(segment.end).getTime() - new Date(segment.start).getTime()) / 60000,
-  );
+  const ms = new Date(segment.end).getTime() - new Date(segment.start).getTime();
+  return ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0;
 }
 
 export function calcTotalMinutes(segments: Segment[]): number {

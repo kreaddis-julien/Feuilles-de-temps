@@ -138,6 +138,18 @@ export class Storage {
     return data;
   }
 
+  async listDates(): Promise<string[]> {
+    try {
+      const files = await fs.readdir(this.dataDir);
+      return files
+        .filter(f => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
+        .map(f => f.replace('.json', ''))
+        .sort();
+    } catch {
+      return [];
+    }
+  }
+
   async saveTimesheet(data: TimesheetDay): Promise<void> {
     await this.ensureDir();
     await this.atomicWrite(
