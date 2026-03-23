@@ -542,39 +542,39 @@ export default function TrackerPage() {
 
       {/* ===== Merge Modal ===== */}
       <Dialog open={mergeOpen} onOpenChange={(open) => { if (!open) setMergeOpen(false); }}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Fusionner {selectedForMerge.size} entrées</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             {/* Entry list with toggle */}
-            <div className="space-y-2 max-h-48 overflow-y-auto">
+            <div className="space-y-2 max-h-60 overflow-y-auto">
               {completedEntries.filter(e => selectedForMerge.has(e.id)).map(entry => (
-                <div key={entry.id} className="flex items-center justify-between gap-2 p-2 rounded-lg border border-border bg-card">
-                  <div className="min-w-0">
+                <div key={entry.id} className="p-2.5 rounded-lg border border-border bg-card space-y-2">
+                  <div>
                     <p className="text-sm font-medium truncate">{entryLabel(entry, activities.activities, customers.customers)}</p>
-                    {entry.description && <p className="text-xs text-muted-foreground truncate">{entry.description}</p>}
+                    {entry.description && <p className="text-xs text-muted-foreground line-clamp-2">{entry.description}</p>}
                   </div>
-                  <div className="flex gap-1 shrink-0">
+                  <div className="flex gap-1">
                     <button
                       onClick={() => setMergeUseIndicated(prev => ({ ...prev, [entry.id]: false }))}
-                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                      className={`flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${
                         !mergeUseIndicated[entry.id]
                           ? 'bg-primary text-primary-foreground'
                           : 'bg-muted text-muted-foreground hover:bg-accent'
                       }`}
                     >
-                      Réel: {formatDuration(entry.totalMinutes)}
+                      Réel : {formatDuration(entry.totalMinutes)}
                     </button>
                     <button
                       onClick={() => setMergeUseIndicated(prev => ({ ...prev, [entry.id]: true }))}
-                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                      className={`flex-1 px-2 py-1.5 rounded text-xs font-medium transition-colors ${
                         mergeUseIndicated[entry.id]
                           ? 'bg-primary text-primary-foreground'
                           : 'bg-muted text-muted-foreground hover:bg-accent'
                       }`}
                     >
-                      Indiqué: {formatDuration(entry.roundedMinutes)}
+                      Indiqué : {formatDuration(entry.roundedMinutes)}
                     </button>
                   </div>
                 </div>
