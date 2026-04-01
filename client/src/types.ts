@@ -44,3 +44,32 @@ export interface TimesheetDay {
   activeEntries: string[];
   pausedEntries: string[];
 }
+
+// --- Activity Tracking ---
+
+export interface ScreenSession {
+  from: string;       // ISO timestamp
+  until: string;      // ISO timestamp
+  app: string;        // e.g. "Google Chrome"
+  bundleId: string;   // e.g. "com.google.Chrome"
+  title: string;      // Window title
+  url?: string;       // Browser URL (Chrome/Safari only)
+}
+
+export interface IdlePeriod {
+  from: string;
+  until: string;
+}
+
+export interface TrackingDay {
+  date: string;
+  screenSessions: ScreenSession[];
+  audioSegments: [];   // Placeholder for Phase 3
+  idlePeriods: IdlePeriod[];
+  report: null;        // Placeholder for Phase 2
+}
+
+export interface TrackingConfig {
+  screenEnabled: boolean;
+  micEnabled: boolean;
+}
