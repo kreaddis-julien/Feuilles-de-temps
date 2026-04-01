@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import type { CustomersData, ActivitiesData, TimesheetDay } from './types.js';
+import type { CustomersData, ActivitiesData, TimesheetDay, TrackingDay, TrackingConfig } from './types.js';
 
 export class Storage {
   private writeLocks = new Map<string, Promise<void>>();
@@ -156,5 +156,34 @@ export class Storage {
       path.join(this.dataDir, `${data.date}.json`),
       JSON.stringify(data, null, 2),
     );
+  }
+
+  async loadTracking(date: string): Promise<TrackingDay> {
+    const filePath = path.join(this.dataDir, `activity-${date}.json`);
+    try {
+      const raw = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+      return raw as TrackingDay;
+    } catch {
+      return { date, screenSessions: [], audioSegments: [], idlePeriods: [], report: null };
+    }
+  }
+
+  async saveTracking(data: TrackingDay): Promise<void> {
+    const filePath = path.join(this.dataDir, `activity-${data.date}.json`);
+    await this.atomicWrite(filePath, JSON.stringify(data, null, 2));
+  }
+
+  async loadTrackingConfig(): Promise<TrackingConfig> {
+    const filePath = path.join(this.dataDir, 'tracking-config.json');
+    try {
+      return JSON.parse(await fs.readFile(filePath, 'utf-8')) as TrackingConfig;
+    } catch {
+      return { screenEnabled: true, micEnabled: false };
+    }
+  }
+
+  async saveTrackingConfig(config: TrackingConfig): Promise<void> {
+    const filePath = path.join(this.dataDir, 'tracking-config.json');
+    await this.atomicWrite(filePath, JSON.stringify(config, null, 2));
   }
 }
