@@ -63,6 +63,20 @@ export default function ReportPage() {
     }
   }
 
+  async function regenerateReport() {
+    if (!selectedDate) return;
+    setLoading(true);
+    try {
+      const r = await api.generateReport(selectedDate);
+      setReport(r);
+      setEditEntries(r.suggestedEntries.map(e => ({ ...e, selected: true })));
+    } catch {
+      setReport(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function activityLabel(activityId: string): string {
     const activity = activities.find(a => a.id === activityId);
     if (!activity) return activityId || '(non assigne)';
@@ -141,8 +155,11 @@ export default function ReportPage() {
         </Button>
         <h1 className="text-2xl font-bold">Rapport — {formatDateFR(selectedDate)}</h1>
         {report?.status === 'validated' && (
-          <span className="text-xs font-medium text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full">Valide</span>
+          <span className="text-xs font-medium text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full">Validé</span>
         )}
+        <Button variant="outline" size="sm" onClick={regenerateReport} disabled={loading}>
+          Regénérer
+        </Button>
       </div>
 
       {loading ? (
