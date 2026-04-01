@@ -170,14 +170,24 @@ export default function ReportPage() {
         <>
           {/* Summary */}
           <Card className="py-4 gap-0">
-            <CardContent className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm">Temps total tracke : <strong>{formatDuration(report.totalTrackedMinutes)}</strong></span>
+            <CardContent className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm">Temps total tracké : <strong>{formatDuration(report.totalTrackedMinutes)}</strong></span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {report.aiEnhanced && (
+                    <span className="text-xs font-medium text-purple-600 bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400 px-2 py-0.5 rounded-full">IA</span>
+                  )}
+                  <span className="text-sm text-muted-foreground">
+                    {report.suggestedEntries.length} identifiée(s) · {report.unmatched.length} non identifiée(s)
+                  </span>
+                </div>
               </div>
-              <span className="text-sm text-muted-foreground">
-                {report.suggestedEntries.length} activite(s) identifiee(s) · {report.unmatched.length} non identifiee(s)
-              </span>
+              {report.summary && (
+                <p className="text-sm text-muted-foreground italic">{report.summary}</p>
+              )}
             </CardContent>
           </Card>
 
