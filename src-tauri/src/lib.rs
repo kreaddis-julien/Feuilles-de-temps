@@ -131,34 +131,71 @@ fn spawn_screen_tracker(_app_handle: tauri::AppHandle) {
                 continue;
             }
 
-            // Get frontmost app and title via AppleScript
+            // Get frontmost app, bundle id, and window title via AppleScript
             let script = r#"
-                tell application "System Events"
-                    set frontApp to name of first application process whose frontmost is true
-                    set frontAppId to bundle identifier of first application process whose frontmost is true
-                end tell
-                tell application "System Events"
-                    try
-                        set winTitle to name of front window of (first application process whose frontmost is true)
-                    on error
-                        set winTitle to ""
-                    end try
-                end tell
-                return frontApp & "||" & frontAppId & "||" & winTitle
+tell application "System Events"
+    set fp to first application process whose frontmost is true
+    set frontApp to name of fp
+    set frontAppId to bundle identifier of fp
+    set winTitle to ""
+    -- Use AXFocusedWindow first (works best for modern apps like cmux)
+    try
+        set focWin to value of attribute "AXFocusedWindow" of fp
+        set winTitle to name of focWin
+    end try
+    -- Fallback: iterate windows for first non-empty name
+    if winTitle is "" then
+        try
+            repeat with w in (every window of fp)
+                set wName to name of w
+                if wName is not "" then
+                    set winTitle to wName
+                    exit repeat
+                end if
+            end repeat
+        end try
+    end if
+end tell
+-- App-specific title overrides (more accurate than System Events)
+if frontAppId is "com.google.Chrome" then
+    try
+        tell application "Google Chrome" to set winTitle to title of active tab of front window
+    end try
+else if frontAppId is "com.apple.Safari" then
+    try
+        tell application "Safari" to set winTitle to name of front document
+    end try
+else if frontAppId is "com.cmuxterm.app" then
+    try
+        tell application "cmux" to set winTitle to name of front window
+    end try
+end if
+return frontApp & "||" & frontAppId & "||" & winTitle
             "#;
 
-            let app_info = std::process::Command::new("osascript")
+            let output = std::process::Command::new("osascript")
                 .arg("-e")
                 .arg(script)
-                .output()
-                .ok()
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .unwrap_or_default()
-                .trim()
-                .to_string();
+                .output();
+
+            let app_info = match &output {
+                Ok(o) => {
+                    let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                    if !stderr.is_empty() {
+                        eprintln!("[screen-tracker] osascript stderr: {}", stderr);
+                    }
+                    stdout
+                }
+                Err(e) => {
+                    eprintln!("[screen-tracker] osascript error: {}", e);
+                    continue;
+                }
+            };
 
             let parts: Vec<&str> = app_info.splitn(3, "||").collect();
             if parts.len() < 3 {
+                eprintln!("[screen-tracker] unexpected output: {}", app_info);
                 continue;
             }
 
@@ -408,6 +445,7 @@ pub fn run() {
             )
             .expect("failed to load tray icon");
 
+            let screen_i_clone = screen_i.clone();
             TrayIconBuilder::with_id("main-tray")
                 .icon(tray_icon)
                 .icon_as_template(true)
@@ -463,7 +501,7 @@ pub fn run() {
                         }
                     }
                 })
-                .on_menu_event(|app, event| match event.id().as_ref() {
+                .on_menu_event(move |app, event| match event.id().as_ref() {
                     "open" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.unminimize();
@@ -481,22 +519,9 @@ pub fn run() {
                                     .put("http://localhost:3001/api/tracking/config/current")
                                     .json(&serde_json::json!({ "screenEnabled": new_val }))
                                     .send();
-                                // Rebuild tray menu with updated label
-                                if let Some(tray) = app.tray_by_id("main-tray") {
-                                    use tauri::menu::PredefinedMenuItem;
-                                    let screen_label = if new_val { "● Tracking écran" } else { "○ Tracking écran" };
-                                    if let (Ok(s), Ok(m), Ok(sep), Ok(o), Ok(q)) = (
-                                        MenuItem::with_id(app, "toggle_screen", screen_label, true, None::<&str>),
-                                        MenuItem::with_id(app, "toggle_mic", "○ Tracking micro", false, None::<&str>),
-                                        PredefinedMenuItem::separator(app),
-                                        MenuItem::with_id(app, "open", "Ouvrir", true, None::<&str>),
-                                        MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>),
-                                    ) {
-                                        if let Ok(new_menu) = Menu::with_items(app, &[&s, &m, &sep, &o, &q]) {
-                                            let _ = tray.set_menu(Some(new_menu));
-                                        }
-                                    }
-                                }
+                                // Update menu item label
+                                let label = if new_val { "● Tracking écran" } else { "○ Tracking écran" };
+                                let _ = screen_i_clone.set_text(label);
                             }
                         }
                     }
