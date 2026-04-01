@@ -158,6 +158,19 @@ export class Storage {
     );
   }
 
+  async listTrackingDates(): Promise<string[]> {
+    try {
+      const files = await fs.readdir(this.dataDir);
+      return files
+        .filter(f => /^activity-\d{4}-\d{2}-\d{2}\.json$/.test(f))
+        .map(f => f.replace('activity-', '').replace('.json', ''))
+        .sort()
+        .reverse();
+    } catch {
+      return [];
+    }
+  }
+
   async loadTracking(date: string): Promise<TrackingDay> {
     const filePath = path.join(this.dataDir, `activity-${date}.json`);
     try {
