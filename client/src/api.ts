@@ -1,4 +1,4 @@
-import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData, Customer } from './types';
+import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData, Customer, TrackingDay, ScreenSession, IdlePeriod, TrackingConfig } from './types';
 
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
 export const BASE = isTauri ? 'http://localhost:3001/api' : '/api';
@@ -90,6 +90,31 @@ export const mergeEntries = (date: string, body: {
   json<TimesheetDay>(`/timesheet/${date}/entries/merge`, {
     method: 'POST',
     body: JSON.stringify(body),
+  });
+
+// Tracking
+export const getTracking = (date: string) =>
+  json<TrackingDay>(`/tracking/${date}`);
+
+export const postScreenSession = (date: string, session: ScreenSession) =>
+  json<{ ok: boolean }>(`/tracking/${date}/screen`, {
+    method: 'POST',
+    body: JSON.stringify(session),
+  });
+
+export const postIdlePeriod = (date: string, idle: IdlePeriod) =>
+  json<{ ok: boolean }>(`/tracking/${date}/idle`, {
+    method: 'POST',
+    body: JSON.stringify(idle),
+  });
+
+export const getTrackingConfig = () =>
+  json<TrackingConfig>('/tracking/config/current');
+
+export const updateTrackingConfig = (config: Partial<TrackingConfig>) =>
+  json<TrackingConfig>('/tracking/config/current', {
+    method: 'PUT',
+    body: JSON.stringify(config),
   });
 
 // Deferred

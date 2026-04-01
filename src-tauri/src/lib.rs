@@ -64,7 +64,228 @@ fn close_tray_popup(app: tauri::AppHandle) {
     }
 }
 
+#[tauri::command]
+fn get_tracking_config() -> Result<serde_json::Value, String> {
+    let client = reqwest::blocking::Client::new();
+    client
+        .get("http://localhost:3001/api/tracking/config/current")
+        .send()
+        .map_err(|e| e.to_string())?
+        .json::<serde_json::Value>()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_tracking_config(screen_enabled: Option<bool>, mic_enabled: Option<bool>) -> Result<serde_json::Value, String> {
+    let mut body = serde_json::Map::new();
+    if let Some(v) = screen_enabled {
+        body.insert("screenEnabled".to_string(), serde_json::Value::Bool(v));
+    }
+    if let Some(v) = mic_enabled {
+        body.insert("micEnabled".to_string(), serde_json::Value::Bool(v));
+    }
+    let client = reqwest::blocking::Client::new();
+    client
+        .put("http://localhost:3001/api/tracking/config/current")
+        .json(&body)
+        .send()
+        .map_err(|e| e.to_string())?
+        .json::<serde_json::Value>()
+        .map_err(|e| e.to_string())
+}
+
 // ───────────────────────────────────────────────────────────────────────────
+
+/// Spawn a thread that polls the frontmost app every 5 seconds and sends data to the server.
+fn spawn_screen_tracker(_app_handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let client = reqwest::blocking::Client::new();
+        let mut last_app = String::new();
+        let mut last_title = String::new();
+        let mut last_url = String::new();
+        let mut was_idle = false;
+        let mut idle_start: Option<String> = None;
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+
+            // Check if screen tracking is enabled
+            let config_ok = client
+                .get("http://localhost:3001/api/tracking/config/current")
+                .send()
+                .ok()
+                .and_then(|r| r.text().ok())
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+
+            let screen_enabled = config_ok
+                .as_ref()
+                .and_then(|v| v["screenEnabled"].as_bool())
+                .unwrap_or(false);
+
+            if !screen_enabled {
+                last_app.clear();
+                last_title.clear();
+                last_url.clear();
+                was_idle = false;
+                idle_start = None;
+                continue;
+            }
+
+            // Get frontmost app, bundle id, and window title via AppleScript
+            let script = r#"
+tell application "System Events"
+    set fp to first application process whose frontmost is true
+    set frontApp to name of fp
+    set frontAppId to bundle identifier of fp
+    set winTitle to ""
+    -- Use AXFocusedWindow first (works best for modern apps like cmux)
+    try
+        set focWin to value of attribute "AXFocusedWindow" of fp
+        set winTitle to name of focWin
+    end try
+    -- Fallback: iterate windows for first non-empty name
+    if winTitle is "" then
+        try
+            repeat with w in (every window of fp)
+                set wName to name of w
+                if wName is not "" then
+                    set winTitle to wName
+                    exit repeat
+                end if
+            end repeat
+        end try
+    end if
+end tell
+-- App-specific title overrides (more accurate than System Events)
+if frontAppId is "com.google.Chrome" then
+    try
+        tell application "Google Chrome" to set winTitle to title of active tab of front window
+    end try
+else if frontAppId is "com.apple.Safari" then
+    try
+        tell application "Safari" to set winTitle to name of front document
+    end try
+else if frontAppId is "com.cmuxterm.app" then
+    try
+        tell application "cmux" to set winTitle to name of front window
+    end try
+end if
+return frontApp & "||" & frontAppId & "||" & winTitle
+            "#;
+
+            let output = std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(script)
+                .output();
+
+            let app_info = match &output {
+                Ok(o) => {
+                    let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                    if !stderr.is_empty() {
+                        eprintln!("[screen-tracker] osascript stderr: {}", stderr);
+                    }
+                    stdout
+                }
+                Err(e) => {
+                    eprintln!("[screen-tracker] osascript error: {}", e);
+                    continue;
+                }
+            };
+
+            let parts: Vec<&str> = app_info.splitn(3, "||").collect();
+            if parts.len() < 3 {
+                eprintln!("[screen-tracker] unexpected output: {}", app_info);
+                continue;
+            }
+
+            let app_name = parts[0].to_string();
+            let bundle_id = parts[1].to_string();
+            let title = parts[2].to_string();
+
+            // Get browser URL if Chrome or Safari
+            let url = if bundle_id == "com.google.Chrome" {
+                let url_script = r#"tell application "Google Chrome" to return URL of active tab of front window"#;
+                std::process::Command::new("osascript")
+                    .arg("-e")
+                    .arg(url_script)
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default()
+            } else if bundle_id == "com.apple.Safari" {
+                let url_script = r#"tell application "Safari" to return URL of front document"#;
+                std::process::Command::new("osascript")
+                    .arg("-e")
+                    .arg(url_script)
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            // Check idle time (seconds since last user input)
+            let idle_script = r#"do shell script "ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}'"#;
+            let idle_secs: u64 = std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(idle_script)
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0);
+
+            let is_idle = idle_secs >= 120; // 2 minutes
+            let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let today = &now[..10]; // YYYY-MM-DD
+
+            // Handle idle transitions
+            if is_idle && !was_idle {
+                idle_start = Some(now.clone());
+            } else if !is_idle && was_idle {
+                if let Some(start) = idle_start.take() {
+                    let _ = client
+                        .post(format!("http://localhost:3001/api/tracking/{}/idle", today))
+                        .json(&serde_json::json!({ "from": start, "until": now }))
+                        .send();
+                }
+            }
+            was_idle = is_idle;
+
+            // Don't record screen sessions while idle
+            if is_idle {
+                continue;
+            }
+
+            // Send screen session (server handles deduplication)
+            if app_name != last_app || title != last_title || url != last_url {
+                last_app = app_name.clone();
+                last_title = title.clone();
+                last_url = url.clone();
+            }
+
+            let mut body = serde_json::json!({
+                "from": now,
+                "until": now,
+                "app": last_app,
+                "bundleId": bundle_id,
+                "title": last_title,
+            });
+            if !last_url.is_empty() {
+                body["url"] = serde_json::json!(last_url);
+            }
+
+            let _ = client
+                .post(format!("http://localhost:3001/api/tracking/{}/screen", today))
+                .json(&body)
+                .send();
+        }
+    });
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -79,6 +300,8 @@ pub fn run() {
             set_tray_title,
             toggle_tray_popup,
             close_tray_popup,
+            get_tracking_config,
+            set_tracking_config,
         ])
         .setup(|app| {
             // Resolve data directory
@@ -208,15 +431,21 @@ pub fn run() {
             }
 
             // ── System tray ──────────────────────────────────────────────────
+            use tauri::menu::PredefinedMenuItem;
+
+            let screen_i = MenuItem::with_id(app, "toggle_screen", "● Tracking écran", true, None::<&str>)?;
+            let mic_i = MenuItem::with_id(app, "toggle_mic", "○ Tracking micro", false, None::<&str>)?;
+            let sep = PredefinedMenuItem::separator(app)?;
             let open_i = MenuItem::with_id(app, "open", "Ouvrir", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&screen_i, &mic_i, &sep, &open_i, &quit_i])?;
 
             let tray_icon = tauri::image::Image::from_bytes(
                 include_bytes!("../icons/tray-icon@2x.png"),
             )
             .expect("failed to load tray icon");
 
+            let screen_i_clone = screen_i.clone();
             TrayIconBuilder::with_id("main-tray")
                 .icon(tray_icon)
                 .icon_as_template(true)
@@ -272,12 +501,28 @@ pub fn run() {
                         }
                     }
                 })
-                .on_menu_event(|app, event| match event.id().as_ref() {
+                .on_menu_event(move |app, event| match event.id().as_ref() {
                     "open" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.unminimize();
                             let _ = window.show();
                             let _ = window.set_focus();
+                        }
+                    }
+                    "toggle_screen" => {
+                        let client = reqwest::blocking::Client::new();
+                        if let Ok(resp) = client.get("http://localhost:3001/api/tracking/config/current").send() {
+                            if let Ok(config) = resp.json::<serde_json::Value>() {
+                                let current = config["screenEnabled"].as_bool().unwrap_or(true);
+                                let new_val = !current;
+                                let _ = client
+                                    .put("http://localhost:3001/api/tracking/config/current")
+                                    .json(&serde_json::json!({ "screenEnabled": new_val }))
+                                    .send();
+                                // Update menu item label
+                                let label = if new_val { "● Tracking écran" } else { "○ Tracking écran" };
+                                let _ = screen_i_clone.set_text(label);
+                            }
                         }
                     }
                     "quit" => {
@@ -295,12 +540,27 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Set initial toggle labels from saved config
+            {
+                let client = reqwest::blocking::Client::new();
+                if let Ok(resp) = client.get("http://localhost:3001/api/tracking/config/current").send() {
+                    if let Ok(config) = resp.json::<serde_json::Value>() {
+                        let screen_on = config["screenEnabled"].as_bool().unwrap_or(true);
+                        let label = if screen_on { "● Tracking écran" } else { "○ Tracking écran" };
+                        let _ = screen_i.set_text(label);
+                    }
+                }
+            }
+
             // Enable autostart
             {
                 use tauri_plugin_autostart::ManagerExt;
                 let autostart = app.autolaunch();
                 let _ = autostart.enable();
             }
+
+            // ── Screen activity tracker ───────────────────────────────────
+            spawn_screen_tracker(app.handle().clone());
 
             Ok(())
         })
