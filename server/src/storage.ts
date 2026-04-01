@@ -186,4 +186,26 @@ export class Storage {
     const filePath = path.join(this.dataDir, 'tracking-config.json');
     await this.atomicWrite(filePath, JSON.stringify(config, null, 2));
   }
+
+  async cleanupOldTracking(retentionDays: number = 30): Promise<number> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - retentionDays);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    let deleted = 0;
+
+    try {
+      const files = await fs.readdir(this.dataDir);
+      for (const file of files) {
+        const match = file.match(/^activity-(\d{4}-\d{2}-\d{2})\.json$/);
+        if (match && match[1] < cutoffStr) {
+          await fs.unlink(path.join(this.dataDir, file));
+          deleted++;
+        }
+      }
+    } catch {
+      // directory might not exist yet
+    }
+
+    return deleted;
+  }
 }

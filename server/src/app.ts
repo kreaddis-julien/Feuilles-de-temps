@@ -44,6 +44,11 @@ export function createApp(dataDir: string, opts?: { staticDir?: string }) {
   app.use('/api/deferred', createDeferredRouter(storage));
   app.use('/api/tracking', createTrackingRouter(storage));
 
+  // Cleanup old tracking data on startup
+  storage.cleanupOldTracking(30).then((n) => {
+    if (n > 0) console.log(`Cleaned up ${n} old tracking file(s)`);
+  });
+
   // Serve frontend static files if --static-dir is provided
   if (opts?.staticDir) {
     app.use(express.static(opts.staticDir));
