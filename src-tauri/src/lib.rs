@@ -64,6 +64,36 @@ fn close_tray_popup(app: tauri::AppHandle) {
     }
 }
 
+#[tauri::command]
+fn get_tracking_config() -> Result<serde_json::Value, String> {
+    let client = reqwest::blocking::Client::new();
+    client
+        .get("http://localhost:3001/api/tracking/config/current")
+        .send()
+        .map_err(|e| e.to_string())?
+        .json::<serde_json::Value>()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_tracking_config(screen_enabled: Option<bool>, mic_enabled: Option<bool>) -> Result<serde_json::Value, String> {
+    let mut body = serde_json::Map::new();
+    if let Some(v) = screen_enabled {
+        body.insert("screenEnabled".to_string(), serde_json::Value::Bool(v));
+    }
+    if let Some(v) = mic_enabled {
+        body.insert("micEnabled".to_string(), serde_json::Value::Bool(v));
+    }
+    let client = reqwest::blocking::Client::new();
+    client
+        .put("http://localhost:3001/api/tracking/config/current")
+        .json(&body)
+        .send()
+        .map_err(|e| e.to_string())?
+        .json::<serde_json::Value>()
+        .map_err(|e| e.to_string())
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 
 /// Spawn a thread that polls the frontmost app every 5 seconds and sends data to the server.
@@ -233,6 +263,8 @@ pub fn run() {
             set_tray_title,
             toggle_tray_popup,
             close_tray_popup,
+            get_tracking_config,
+            set_tracking_config,
         ])
         .setup(|app| {
             // Resolve data directory
@@ -362,9 +394,14 @@ pub fn run() {
             }
 
             // ── System tray ──────────────────────────────────────────────────
+            use tauri::menu::PredefinedMenuItem;
+
+            let screen_i = MenuItem::with_id(app, "toggle_screen", "● Tracking écran", true, None::<&str>)?;
+            let mic_i = MenuItem::with_id(app, "toggle_mic", "○ Tracking micro", false, None::<&str>)?;
+            let sep = PredefinedMenuItem::separator(app)?;
             let open_i = MenuItem::with_id(app, "open", "Ouvrir", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&screen_i, &mic_i, &sep, &open_i, &quit_i])?;
 
             let tray_icon = tauri::image::Image::from_bytes(
                 include_bytes!("../icons/tray-icon@2x.png"),
@@ -434,6 +471,35 @@ pub fn run() {
                             let _ = window.set_focus();
                         }
                     }
+                    "toggle_screen" => {
+                        let client = reqwest::blocking::Client::new();
+                        if let Ok(resp) = client.get("http://localhost:3001/api/tracking/config/current").send() {
+                            if let Ok(config) = resp.json::<serde_json::Value>() {
+                                let current = config["screenEnabled"].as_bool().unwrap_or(true);
+                                let new_val = !current;
+                                let _ = client
+                                    .put("http://localhost:3001/api/tracking/config/current")
+                                    .json(&serde_json::json!({ "screenEnabled": new_val }))
+                                    .send();
+                                // Rebuild tray menu with updated label
+                                if let Some(tray) = app.tray_by_id("main-tray") {
+                                    use tauri::menu::PredefinedMenuItem;
+                                    let screen_label = if new_val { "● Tracking écran" } else { "○ Tracking écran" };
+                                    if let (Ok(s), Ok(m), Ok(sep), Ok(o), Ok(q)) = (
+                                        MenuItem::with_id(app, "toggle_screen", screen_label, true, None::<&str>),
+                                        MenuItem::with_id(app, "toggle_mic", "○ Tracking micro", false, None::<&str>),
+                                        PredefinedMenuItem::separator(app),
+                                        MenuItem::with_id(app, "open", "Ouvrir", true, None::<&str>),
+                                        MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>),
+                                    ) {
+                                        if let Ok(new_menu) = Menu::with_items(app, &[&s, &m, &sep, &o, &q]) {
+                                            let _ = tray.set_menu(Some(new_menu));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     "quit" => {
                         // Kill sidecar before exiting
                         if let Some(state) = app.try_state::<SidecarChild>() {
@@ -448,6 +514,18 @@ pub fn run() {
                     _ => {}
                 })
                 .build(app)?;
+
+            // Set initial toggle labels from saved config
+            {
+                let client = reqwest::blocking::Client::new();
+                if let Ok(resp) = client.get("http://localhost:3001/api/tracking/config/current").send() {
+                    if let Ok(config) = resp.json::<serde_json::Value>() {
+                        let screen_on = config["screenEnabled"].as_bool().unwrap_or(true);
+                        let label = if screen_on { "● Tracking écran" } else { "○ Tracking écran" };
+                        let _ = screen_i.set_text(label);
+                    }
+                }
+            }
 
             // Enable autostart
             {
