@@ -10,6 +10,7 @@ import type { TimesheetEntry } from './types';
 import TrackerPage from './pages/TrackerPage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
+import ReportPage from './pages/ReportPage';
 import TrayPopupPage from './pages/TrayPopupPage';
 import * as api from './api';
 
@@ -150,6 +151,18 @@ function AppInner() {
             Stats
           </NavLink>
           <NavLink
+            to="/report"
+            className={({ isActive }) =>
+              `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                isActive
+                  ? 'text-primary bg-primary/10 font-semibold'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+              }`
+            }
+          >
+            Rapport
+          </NavLink>
+          <NavLink
             to="/settings"
             className={({ isActive }) =>
               `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
@@ -227,6 +240,7 @@ function AppInner() {
         <Routes>
           <Route path="/" element={<TrackerPage />} />
           <Route path="/stats" element={<StatsPage />} />
+          <Route path="/report" element={<ReportPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
