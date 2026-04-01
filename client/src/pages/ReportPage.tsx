@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { TrackingReport, SuggestedEntry } from '../types';
+import type { TrackingReport, SuggestedEntry, AudioSegment } from '../types';
 import * as api from '../api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ChevronLeft, FileText, Check, Clock, AlertCircle } from 'lucide-react';
+import { ChevronLeft, FileText, Check, Clock, AlertCircle, Mic, ChevronDown } from 'lucide-react';
 
 function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -30,6 +30,8 @@ export default function ReportPage() {
   const [editEntries, setEditEntries] = useState<(SuggestedEntry & { selected: boolean })[]>([]);
   const [activities, setActivities] = useState<{ id: string; name: string; customerId: string }[]>([]);
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
+  const [audioSegments, setAudioSegments] = useState<AudioSegment[]>([]);
+  const [showAudio, setShowAudio] = useState(false);
 
   const refreshDates = useCallback(async () => {
     try {
@@ -48,14 +50,17 @@ export default function ReportPage() {
   async function selectDate(date: string) {
     setSelectedDate(date);
     setLoading(true);
+    setShowAudio(false);
     try {
       let r = await api.getReport(date);
       if (!r) {
-        // Generate report if not yet generated
         r = await api.generateReport(date);
       }
       setReport(r);
       setEditEntries(r.suggestedEntries.map(e => ({ ...e, selected: true })));
+      // Load audio segments
+      const tracking = await api.getTracking(date);
+      setAudioSegments(tracking.audioSegments.filter(s => s.hasSpeech));
     } catch {
       setReport(null);
     } finally {
@@ -272,6 +277,30 @@ export default function ReportPage() {
                   </div>
                 ))}
               </div>
+            </section>
+          )}
+
+          {/* Audio transcriptions */}
+          {audioSegments.length > 0 && (
+            <section className="space-y-3">
+              <button
+                onClick={() => setShowAudio(v => !v)}
+                className="flex items-center gap-2 text-lg font-semibold hover:text-primary transition-colors"
+              >
+                <Mic className="h-4 w-4" />
+                Transcriptions audio ({audioSegments.length})
+                <ChevronDown className={`h-4 w-4 transition-transform ${showAudio ? 'rotate-180' : ''}`} />
+              </button>
+              {showAudio && (
+                <div className="space-y-1">
+                  {audioSegments.map((seg, i) => (
+                    <div key={i} className="flex gap-3 text-sm px-3 py-2 rounded-lg bg-muted/50">
+                      <span className="text-muted-foreground shrink-0 tabular-nums">{seg.timestamp.slice(11, 16)}</span>
+                      <span>{seg.transcript}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           )}
 
