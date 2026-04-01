@@ -630,8 +630,9 @@ pub fn run() {
                 if let Ok(resp) = client.get("http://localhost:3001/api/tracking/config/current").send() {
                     if let Ok(config) = resp.json::<serde_json::Value>() {
                         let screen_on = config["screenEnabled"].as_bool().unwrap_or(true);
-                        let label = if screen_on { "● Tracking écran" } else { "○ Tracking écran" };
-                        let _ = screen_i.set_text(label);
+                        let mic_on = config["micEnabled"].as_bool().unwrap_or(false);
+                        let _ = screen_i.set_text(if screen_on { "● Tracking écran" } else { "○ Tracking écran" });
+                        let _ = mic_i.set_text(if mic_on { "● Tracking micro" } else { "○ Tracking micro" });
                     }
                 }
             }
