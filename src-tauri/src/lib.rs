@@ -96,6 +96,74 @@ fn set_tracking_config(screen_enabled: Option<bool>, mic_enabled: Option<bool>) 
 
 // ───────────────────────────────────────────────────────────────────────────
 
+/// Spawn a thread that captures audio from the microphone in 30s chunks and sends to server for transcription.
+fn spawn_mic_tracker(_app_handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .unwrap();
+
+        loop {
+            // Check if mic tracking is enabled
+            let config_ok = client
+                .get("http://localhost:3001/api/tracking/config/current")
+                .send()
+                .ok()
+                .and_then(|r| r.text().ok())
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+
+            let mic_enabled = config_ok
+                .as_ref()
+                .and_then(|v| v["micEnabled"].as_bool())
+                .unwrap_or(false);
+
+            if !mic_enabled {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                continue;
+            }
+
+            // Record 30 seconds of audio using sox
+            let tmp_path = format!("/tmp/tempo-mic-{}-{}.wav", std::process::id(), chrono::Utc::now().timestamp_millis());
+            let record = std::process::Command::new("/opt/homebrew/bin/sox")
+                .args([
+                    "-d",                    // default input device (microphone)
+                    "-r", "16000",           // 16kHz sample rate (whisper requirement)
+                    "-c", "1",               // mono
+                    "-b", "16",              // 16-bit
+                    &tmp_path,               // output file
+                    "trim", "0", "30",       // record 30 seconds
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+
+            match record {
+                Ok(status) if status.success() => {
+                    // Read the WAV file and send to server
+                    if let Ok(audio_data) = std::fs::read(&tmp_path) {
+                        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                        let today = &now[..10];
+
+                        let _ = client
+                            .post(format!("http://localhost:3001/api/tracking/{}/audio", today))
+                            .header("Content-Type", "audio/wav")
+                            .body(audio_data)
+                            .send();
+                    }
+                    // Cleanup
+                    let _ = std::fs::remove_file(&tmp_path);
+                }
+                _ => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    eprintln!("[mic-tracker] sox recording failed");
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                }
+            }
+        }
+    });
+}
+
 /// Spawn a thread that polls the frontmost app every 5 seconds and sends data to the server.
 fn spawn_screen_tracker(_app_handle: tauri::AppHandle) {
     std::thread::spawn(move || {
@@ -434,7 +502,7 @@ pub fn run() {
             use tauri::menu::PredefinedMenuItem;
 
             let screen_i = MenuItem::with_id(app, "toggle_screen", "● Tracking écran", true, None::<&str>)?;
-            let mic_i = MenuItem::with_id(app, "toggle_mic", "○ Tracking micro", false, None::<&str>)?;
+            let mic_i = MenuItem::with_id(app, "toggle_mic", "○ Tracking micro", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             let open_i = MenuItem::with_id(app, "open", "Ouvrir", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
@@ -446,6 +514,7 @@ pub fn run() {
             .expect("failed to load tray icon");
 
             let screen_i_clone = screen_i.clone();
+            let mic_i_clone = mic_i.clone();
             TrayIconBuilder::with_id("main-tray")
                 .icon(tray_icon)
                 .icon_as_template(true)
@@ -525,6 +594,21 @@ pub fn run() {
                             }
                         }
                     }
+                    "toggle_mic" => {
+                        let client = reqwest::blocking::Client::new();
+                        if let Ok(resp) = client.get("http://localhost:3001/api/tracking/config/current").send() {
+                            if let Ok(config) = resp.json::<serde_json::Value>() {
+                                let current = config["micEnabled"].as_bool().unwrap_or(false);
+                                let new_val = !current;
+                                let _ = client
+                                    .put("http://localhost:3001/api/tracking/config/current")
+                                    .json(&serde_json::json!({ "micEnabled": new_val }))
+                                    .send();
+                                let label = if new_val { "● Tracking micro" } else { "○ Tracking micro" };
+                                let _ = mic_i_clone.set_text(label);
+                            }
+                        }
+                    }
                     "quit" => {
                         // Kill sidecar before exiting
                         if let Some(state) = app.try_state::<SidecarChild>() {
@@ -561,6 +645,7 @@ pub fn run() {
 
             // ── Screen activity tracker ───────────────────────────────────
             spawn_screen_tracker(app.handle().clone());
+            spawn_mic_tracker(app.handle().clone());
 
             Ok(())
         })
