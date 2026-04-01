@@ -56,6 +56,13 @@ export interface ScreenSession {
   url?: string;       // Browser URL (Chrome/Safari only)
 }
 
+export interface AudioSegment {
+  timestamp: string;
+  duration: number;
+  transcript: string;
+  hasSpeech: boolean;
+}
+
 export interface IdlePeriod {
   from: string;
   until: string;
@@ -64,7 +71,7 @@ export interface IdlePeriod {
 export interface TrackingDay {
   date: string;
   screenSessions: ScreenSession[];
-  audioSegments: [];   // Placeholder for Phase 3
+  audioSegments: AudioSegment[];
   idlePeriods: IdlePeriod[];
   report: TrackingReport | null;
 }
