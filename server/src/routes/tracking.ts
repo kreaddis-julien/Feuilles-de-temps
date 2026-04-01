@@ -122,17 +122,26 @@ export function createTrackingRouter(storage: Storage) {
         .trim();
 
       // Only store if there's actual speech content (filter out whisper noise artifacts)
-      const noisePatterns = ['(Propos inaudibles)', '(Sous-titres', '[BLANK_AUDIO]', '(Musique)', '(Bruit)', '...', '( )', '[Musique]'];
-      const hasSpeech = transcript.length > 10 &&
+      const noisePatterns = [
+        '(Propos inaudibles)', '(Sous-titres', '[BLANK_AUDIO]', '(Musique)',
+        '(Bruit)', '( )', '[Musique]', 'Propos inaudibles',
+      ];
+      // Filter transcripts that are only sound effects: *Bruit*, *Toc*, *cough*, etc.
+      const cleaned = transcript
+        .replace(/\*[^*]+\*/g, '')  // Remove *sound effects*
+        .replace(/\s+/g, ' ')
+        .trim();
+      const hasSpeech = cleaned.length > 15 &&
         !transcript.match(/^\[.*\]$/) &&
         !transcript.match(/^\(.*\)$/) &&
-        !noisePatterns.some(p => transcript.includes(p));
+        !noisePatterns.some(p => transcript.includes(p)) &&
+        !transcript.match(/^[\s*\w\s]*\*[^*]+\*[\s*\w\s]*$/);  // Only sound effects
 
       if (hasSpeech) {
         (data as any).audioSegments.push({
           timestamp: now,
           duration: 30,
-          transcript,
+          transcript: cleaned,
           hasSpeech: true,
         });
         await storage.saveTracking(data);
