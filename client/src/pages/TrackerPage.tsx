@@ -206,6 +206,14 @@ export default function TrackerPage() {
       activityId: entry.activityId,
     });
     await api.pauseEntry(currentDate, entry.id);
+    const remainingActive = activeEntries.filter(e => e.id !== entry.id);
+    if (remainingActive.length === 0) {
+      updateTrayTitle('⏸');
+    } else if (remainingActive.length === 1) {
+      // Will show single timer on next tick
+    } else {
+      updateTrayTitle(`${remainingActive.length} actifs`);
+    }
     await refresh(true);
   }
 
@@ -216,6 +224,14 @@ export default function TrackerPage() {
       activityId: entry.activityId,
     });
     await api.updateEntry(currentDate, entry.id, { status: 'completed' });
+    const remainingActive = activeEntries.filter(e => e.id !== entry.id);
+    if (remainingActive.length === 0) {
+      updateTrayTitle(pausedEntries.length > 0 ? '⏸' : '');
+    } else if (remainingActive.length === 1) {
+      // Will switch from "N actifs" to single timer on next tick
+    } else {
+      updateTrayTitle(`${remainingActive.length} actifs`);
+    }
     await refresh(true);
   }
 
@@ -282,6 +298,11 @@ export default function TrackerPage() {
 
   async function handleDeleteEntry(id: string) {
     await api.deleteEntry(currentDate, id);
+    const remainingActive = activeEntries.filter(e => e.id !== id);
+    if (remainingActive.length === 0) {
+      const remainingPaused = pausedEntries.filter(e => e.id !== id);
+      updateTrayTitle(remainingPaused.length > 0 ? '⏸' : '');
+    }
     await refresh(true);
   }
 
