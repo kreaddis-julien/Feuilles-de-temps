@@ -1,4 +1,4 @@
-import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData, Customer, TrackingDay, ScreenSession, IdlePeriod, TrackingConfig } from './types';
+import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData, Customer, TrackingDay, TrackingReport, ScreenSession, IdlePeriod, TrackingConfig } from './types';
 
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
 export const BASE = isTauri ? 'http://localhost:3001/api' : '/api';
@@ -115,6 +115,22 @@ export const updateTrackingConfig = (config: Partial<TrackingConfig>) =>
   json<TrackingConfig>('/tracking/config/current', {
     method: 'PUT',
     body: JSON.stringify(config),
+  });
+
+// Reports
+export const getReportDates = () =>
+  json<{ date: string; hasReport: boolean; status: string | null }[]>('/report');
+
+export const getReport = (date: string) =>
+  json<TrackingReport | null>(`/report/${date}`);
+
+export const generateReport = (date: string) =>
+  json<TrackingReport>(`/report/${date}/generate`, { method: 'POST' });
+
+export const validateReport = (date: string, entries: { activityId: string; description: string; roundedMinutes: number }[]) =>
+  json<{ ok: boolean; entriesCreated: number }>(`/report/${date}/validate`, {
+    method: 'POST',
+    body: JSON.stringify({ entries }),
   });
 
 // Deferred

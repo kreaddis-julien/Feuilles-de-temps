@@ -66,7 +66,49 @@ export interface TrackingDay {
   screenSessions: ScreenSession[];
   audioSegments: [];   // Placeholder for Phase 3
   idlePeriods: IdlePeriod[];
-  report: null;        // Placeholder for Phase 2
+  report: TrackingReport | null;
+}
+
+export interface TrackingReport {
+  date: string;
+  generatedAt: string;
+  status: 'pending' | 'validated';
+  blocks: ReportBlock[];
+  suggestedEntries: SuggestedEntry[];
+  unmatched: UnmatchedBlock[];
+  totalTrackedMinutes: number;
+}
+
+export interface ReportBlock {
+  from: string;
+  to: string;
+  app: string;
+  title: string;
+  url?: string;
+  totalMinutes: number;
+  totalSeconds: number;
+  activityId?: string;
+  customerName?: string;
+  confidence: number;
+}
+
+export interface SuggestedEntry {
+  activityId: string;
+  customerName?: string;
+  description: string;
+  totalMinutes: number;
+  roundedMinutes: number;
+  confidence: number;
+  blockCount: number;
+}
+
+export interface UnmatchedBlock {
+  from: string;
+  to: string;
+  app: string;
+  title: string;
+  url?: string;
+  totalMinutes: number;
 }
 
 export interface TrackingConfig {

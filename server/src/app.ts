@@ -10,6 +10,7 @@ import { createExportRouter } from './routes/export.js';
 import { createStatsRouter } from './routes/stats.js';
 import { createDeferredRouter } from './routes/deferred.js';
 import { createTrackingRouter } from './routes/tracking.js';
+import { createReportRouter } from './routes/report.js';
 
 function getLocalIp(): string | null {
   const interfaces = os.networkInterfaces();
@@ -43,6 +44,7 @@ export function createApp(dataDir: string, opts?: { staticDir?: string }) {
   app.use('/api/stats', createStatsRouter(storage));
   app.use('/api/deferred', createDeferredRouter(storage));
   app.use('/api/tracking', createTrackingRouter(storage));
+  app.use('/api/report', createReportRouter(storage));
 
   // Cleanup old tracking data on startup
   storage.cleanupOldTracking(30).then((n) => {
