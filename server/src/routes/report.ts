@@ -15,7 +15,7 @@ export function createReportRouter(storage: Storage) {
     return res.json(null);
   });
 
-  // Generate report for a date (basic aggregation, no AI)
+  // Generate (or regenerate) report for a date (basic aggregation, no AI)
   router.post('/:date/generate', async (req, res) => {
     const tracking = await storage.loadTracking(req.params.date);
     const activities = await storage.loadActivities();
@@ -37,15 +37,16 @@ export function createReportRouter(storage: Storage) {
     // Group by matched activity to create suggested entries
     const suggestedEntries = buildSuggestedEntries(matchedBlocks);
 
-    // Build unmatched list
+    // Build unmatched list (only blocks with at least 1 min)
     const unmatched = matchedBlocks
-      .filter(b => !b.activityId)
+      .filter(b => !b.activityId && b.totalMinutes >= 1)
       .map(b => ({
         from: b.from,
         to: b.to,
         app: b.app,
         title: b.title,
         url: b.url,
+        domain: b.domain,
         totalMinutes: b.totalMinutes,
       }));
 
@@ -118,12 +119,23 @@ export function createReportRouter(storage: Storage) {
 
 // --- Helper functions ---
 
+function extractDomain(url?: string): string {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    return u.hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
 interface AggregatedBlock {
   from: string;
   to: string;
   app: string;
   title: string;
   url?: string;
+  domain?: string;
   totalMinutes: number;
   totalSeconds: number;
 }
@@ -131,37 +143,60 @@ interface AggregatedBlock {
 function aggregateSessions(sessions: ScreenSession[]): AggregatedBlock[] {
   if (sessions.length === 0) return [];
 
-  const blocks: AggregatedBlock[] = [];
-  let current: AggregatedBlock | null = null;
+  // Phase 1: aggregate by domain for browsers, by app+title for others
+  const buckets = new Map<string, AggregatedBlock>();
 
   for (const s of sessions) {
-    const key = `${s.app}|${s.title}|${s.url ?? ''}`;
     const from = new Date(s.from).getTime();
     const until = new Date(s.until).getTime();
-    const secs = Math.max(5, (until - from) / 1000); // min 5s per session
+    const secs = Math.max(5, (until - from) / 1000);
+    const domain = extractDomain(s.url);
 
-    if (current && `${current.app}|${current.title}|${current.url ?? ''}` === key) {
-      // Extend current block
-      current.to = s.until;
-      current.totalSeconds += secs;
-      current.totalMinutes = Math.round(current.totalSeconds / 60);
+    // For browsers with URLs, group by domain
+    // For terminals (cmux, Terminal, iTerm), strip spinner chars and group by base session name
+    // For other apps, group by app name
+    let key: string;
+    if (domain) {
+      key = `${s.app}|${domain}`;
     } else {
-      // Start new block
-      if (current) blocks.push(current);
-      current = {
+      // Normalize terminal titles: strip leading spinner chars (⠐⠂✳⠈⠠⠄⠁ etc.)
+      const cleanTitle = s.title.replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁]\s*/, '').trim();
+      key = cleanTitle ? `${s.app}|${cleanTitle}` : s.app;
+    }
+
+    // Use cleaned title for display
+    const displayTitle = domain
+      ? s.title
+      : s.title.replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁]\s*/, '').trim();
+
+    const existing = buckets.get(key);
+    if (existing) {
+      if (s.until > existing.to) existing.to = s.until;
+      if (s.from < existing.from) existing.from = s.from;
+      existing.totalSeconds += secs;
+      existing.totalMinutes = Math.round(existing.totalSeconds / 60);
+      // Keep the most descriptive title (longest)
+      if (displayTitle.length > existing.title.length) {
+        existing.title = displayTitle;
+      }
+    } else {
+      buckets.set(key, {
         from: s.from,
         to: s.until,
         app: s.app,
-        title: s.title,
+        title: displayTitle || s.app,
         url: s.url,
+        domain: domain || undefined,
         totalSeconds: secs,
         totalMinutes: Math.round(secs / 60),
-      };
+      });
     }
   }
-  if (current) blocks.push(current);
 
-  return blocks;
+  // Sort by total time descending, filter out very short sessions (< 30s)
+  return [...buckets.values()]
+    .filter(b => b.totalSeconds >= 30)
+    .sort((a, b) => b.totalSeconds - a.totalSeconds);
 }
 
 function tryMatch(
@@ -169,15 +204,23 @@ function tryMatch(
   activities: { id: string; name: string; customerId: string }[],
   customers: { id: string; name: string; type: string }[],
 ): { activityId?: string; customerName?: string; confidence: number } {
+  const domain = (block.domain ?? '').toLowerCase();
   const url = (block.url ?? '').toLowerCase();
   const title = block.title.toLowerCase();
+  const app = block.app.toLowerCase();
 
-  // Try to match by URL domain to customer
+  // Try to match by domain or title to customer name
   for (const customer of customers) {
     const custLower = customer.name.toLowerCase();
-    // Check if customer name appears in URL or title
-    if (url.includes(custLower) || title.includes(custLower)) {
-      // Find an activity for this customer
+    // Check domain first (most reliable)
+    if (domain && domain.includes(custLower)) {
+      const activity = activities.find(a => a.customerId === customer.id);
+      if (activity) {
+        return { activityId: activity.id, customerName: customer.name, confidence: 0.9 };
+      }
+    }
+    // Check title
+    if (title.includes(custLower)) {
       const activity = activities.find(a => a.customerId === customer.id);
       if (activity) {
         return { activityId: activity.id, customerName: customer.name, confidence: 0.7 };
@@ -185,10 +228,10 @@ function tryMatch(
     }
   }
 
-  // Try to match activity name in title
+  // Try to match activity name in domain, title, or URL
   for (const activity of activities) {
     const actLower = activity.name.toLowerCase();
-    if (title.includes(actLower) || url.includes(actLower)) {
+    if (domain.includes(actLower) || title.includes(actLower) || url.includes(actLower)) {
       const customer = customers.find(c => c.id === activity.customerId);
       return { activityId: activity.id, customerName: customer?.name, confidence: 0.6 };
     }
@@ -208,12 +251,12 @@ interface SuggestedEntry {
 }
 
 function buildSuggestedEntries(blocks: (AggregatedBlock & { activityId?: string; customerName?: string; confidence: number })[]): SuggestedEntry[] {
-  const byActivity = new Map<string, { totalMin: number; titles: Set<string>; confidence: number; customerName?: string; count: number }>();
+  const byActivity = new Map<string, { totalSecs: number; titles: Set<string>; confidence: number; customerName?: string; count: number }>();
 
   for (const b of blocks) {
     if (!b.activityId) continue;
-    const existing = byActivity.get(b.activityId) || { totalMin: 0, titles: new Set(), confidence: 0, customerName: b.customerName, count: 0 };
-    existing.totalMin += b.totalMinutes;
+    const existing = byActivity.get(b.activityId) || { totalSecs: 0, titles: new Set(), confidence: 0, customerName: b.customerName, count: 0 };
+    existing.totalSecs += b.totalSeconds;
     if (b.title) existing.titles.add(b.title);
     existing.confidence = Math.max(existing.confidence, b.confidence);
     existing.count++;
@@ -222,13 +265,16 @@ function buildSuggestedEntries(blocks: (AggregatedBlock & { activityId?: string;
 
   const entries: SuggestedEntry[] = [];
   for (const [activityId, data] of byActivity) {
+    const totalMinutes = Math.round(data.totalSecs / 60);
+    // Skip activities with less than 2 minutes total (likely just quick glances)
+    if (totalMinutes < 2) continue;
     const titles = [...data.titles].slice(0, 3).join(', ');
-    const roundedMinutes = data.totalMin === 0 ? 15 : Math.ceil(data.totalMin / 15) * 15;
+    const roundedMinutes = Math.max(15, Math.ceil(totalMinutes / 15) * 15);
     entries.push({
       activityId,
       customerName: data.customerName,
       description: titles,
-      totalMinutes: data.totalMin,
+      totalMinutes,
       roundedMinutes,
       confidence: data.confidence,
       blockCount: data.count,
