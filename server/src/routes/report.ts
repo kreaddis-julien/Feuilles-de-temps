@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import type { Storage } from '../storage.js';
 import type { ScreenSession } from '../types.js';
+import { checkOllama, analyzeReport } from '../ollama.js';
 
 export function createReportRouter(storage: Storage) {
   const router = Router();
@@ -50,14 +51,70 @@ export function createReportRouter(storage: Storage) {
         totalMinutes: b.totalMinutes,
       }));
 
+    let summary = '';
+
+    // Try LLM-enhanced analysis if Ollama is available
+    const ollama = await checkOllama();
+    const hasLLM = ollama.available && ollama.models.some(m => m.startsWith('llama'));
+    if (hasLLM && (unmatched.length > 0 || suggestedEntries.length > 0)) {
+      try {
+        const activitiesWithCustomer = activities.activities.map(a => {
+          const c = customers.customers.find(c => c.id === a.customerId);
+          return { id: a.id, name: a.name, customerName: c?.name ?? '' };
+        });
+
+        const llmResult = await analyzeReport({
+          date: req.params.date,
+          blocks: suggestedEntries.map(e => ({ app: '', title: e.description, totalMinutes: e.totalMinutes })),
+          unmatched: unmatched.map(b => ({ app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes })),
+          activities: activitiesWithCustomer,
+        });
+
+        summary = llmResult.summary;
+
+        // Merge LLM suggestions into unmatched → suggested
+        for (const s of llmResult.suggestions) {
+          if (s.activityId) {
+            // Move from unmatched to suggested
+            const existing = suggestedEntries.find(e => e.activityId === s.activityId);
+            if (existing) {
+              existing.totalMinutes += s.totalMinutes;
+              existing.roundedMinutes = Math.max(15, Math.ceil(existing.totalMinutes / 15) * 15);
+              if (s.description && !existing.description.includes(s.description)) {
+                existing.description += ', ' + s.description;
+              }
+            } else {
+              suggestedEntries.push({
+                activityId: s.activityId,
+                description: s.description,
+                totalMinutes: s.totalMinutes,
+                roundedMinutes: Math.max(15, Math.ceil(s.totalMinutes / 15) * 15),
+                confidence: 0.5,
+                blockCount: 1,
+              });
+            }
+          }
+        }
+
+        // Remove matched items from unmatched
+        const matchedByLLM = new Set(llmResult.suggestions.filter(s => s.activityId).map(s => s.description));
+        // Don't filter unmatched by description match — keep them for manual review
+      } catch (err) {
+        console.error('[report] LLM analysis failed:', err);
+        // Continue with basic report
+      }
+    }
+
     const report = {
       date: req.params.date,
       generatedAt: new Date().toISOString(),
       status: 'pending' as const,
+      summary,
       blocks: matchedBlocks,
       suggestedEntries,
       unmatched,
       totalTrackedMinutes: blocks.reduce((s, b) => s + b.totalMinutes, 0),
+      aiEnhanced: hasLLM,
     };
 
     tracking.report = report;

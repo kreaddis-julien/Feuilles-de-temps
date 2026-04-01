@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { Storage } from '../storage.js';
 import type { ScreenSession, IdlePeriod } from '../types.js';
+import { checkOllama } from '../ollama.js';
 
 export function createTrackingRouter(storage: Storage) {
   const router = Router();
@@ -62,6 +63,12 @@ export function createTrackingRouter(storage: Storage) {
 
     await storage.saveTracking(data);
     res.json({ ok: true });
+  });
+
+  // Ollama status
+  router.get('/ollama/status', async (_req, res) => {
+    const status = await checkOllama();
+    res.json(status);
   });
 
   return router;

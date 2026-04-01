@@ -73,10 +73,12 @@ export interface TrackingReport {
   date: string;
   generatedAt: string;
   status: 'pending' | 'validated';
+  summary?: string;
   blocks: ReportBlock[];
   suggestedEntries: SuggestedEntry[];
   unmatched: UnmatchedBlock[];
   totalTrackedMinutes: number;
+  aiEnhanced?: boolean;
 }
 
 export interface ReportBlock {
