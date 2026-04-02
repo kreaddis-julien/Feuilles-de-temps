@@ -96,15 +96,26 @@ export function createTrackingRouter(storage: Storage) {
       return res.json({ ok: true, hasSpeech: false });
     }
 
+    // Check audio energy level before transcribing (skip silence/low noise)
+    // WAV header is 44 bytes, then 16-bit PCM samples
+    const samples = new Int16Array(audioBuffer.buffer, audioBuffer.byteOffset + 44, Math.floor((audioBuffer.length - 44) / 2));
+    let sumSquares = 0;
+    for (let i = 0; i < samples.length; i++) {
+      sumSquares += samples[i] * samples[i];
+    }
+    const rms = Math.sqrt(sumSquares / samples.length);
+    // RMS < 500 = essentially silence/background noise (16-bit range is -32768 to 32767)
+    if (rms < 500) {
+      return res.json({ ok: true, hasSpeech: false, rms: Math.round(rms) });
+    }
+
     // Write to temp file
     const tmpDir = os.tmpdir();
     const wavPath = path.join(tmpDir, `tempo-audio-${Date.now()}.wav`);
     await fs.writeFile(wavPath, audioBuffer);
 
     try {
-      // Check if audio has actual speech (simple size heuristic: 30s of silence at 16kHz mono = ~960KB)
-      // Real speech typically produces larger files due to higher amplitude
-      // Use the best available whisper model (prefer large-v3 > medium > small)
+      // Use the best available whisper model (prefer large-v3-turbo > large-v3 > medium > small)
       const modelsDir = path.join(os.homedir(), '.local/share/whisper-models');
       let whisperModel = '';
       for (const m of ['ggml-large-v3-turbo.bin', 'ggml-large-v3.bin', 'ggml-medium.bin', 'ggml-small.bin']) {
@@ -140,17 +151,25 @@ export function createTrackingRouter(storage: Storage) {
         'Merci d\'avoir regardé', 'Merci d\'avoir', 'Merci de votre',
         'Abonnez-vous', 'N\'oubliez pas', 'Like et abonnez',
         'ST\'', 'STP', 'cette vidéo',
+        'tipeurs', 'souscripteurs', 'Salut mon gars',
+        'Merci à mes', 'Merci à tous',
       ];
       // Filter transcripts that are only sound effects: *Bruit*, *Toc*, *cough*, etc.
       const cleaned = transcript
         .replace(/\*[^*]+\*/g, '')  // Remove *sound effects*
         .replace(/\s+/g, ' ')
         .trim();
+      // Detect repeated phrases (hallucination pattern: "Salut mon gars. Salut mon gars.")
+      const sentences = cleaned.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 3);
+      const uniqueSentences = new Set(sentences);
+      const isRepetitive = sentences.length >= 2 && uniqueSentences.size === 1;
+
       const hasSpeech = cleaned.length > 15 &&
         !transcript.match(/^\[.*\]$/) &&
         !transcript.match(/^\(.*\)$/) &&
         !noisePatterns.some(p => transcript.includes(p)) &&
-        !transcript.match(/^[\s*\w\s]*\*[^*]+\*[\s*\w\s]*$/);  // Only sound effects
+        !transcript.match(/^[\s*\w\s]*\*[^*]+\*[\s*\w\s]*$/) &&
+        !isRepetitive;
 
       if (hasSpeech) {
         (data as any).audioSegments.push({
