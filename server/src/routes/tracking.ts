@@ -136,6 +136,10 @@ export function createTrackingRouter(storage: Storage) {
       const noisePatterns = [
         '(Propos inaudibles)', '(Sous-titres', '[BLANK_AUDIO]', '(Musique)',
         '(Bruit)', '( )', '[Musique]', 'Propos inaudibles',
+        'Sous-titrage', 'Sous-titres', 'sous-titrage', 'sous-titres',
+        'Merci d\'avoir regardé', 'Merci d\'avoir', 'Merci de votre',
+        'Abonnez-vous', 'N\'oubliez pas', 'Like et abonnez',
+        'ST\'', 'STP', 'cette vidéo',
       ];
       // Filter transcripts that are only sound effects: *Bruit*, *Toc*, *cough*, etc.
       const cleaned = transcript
