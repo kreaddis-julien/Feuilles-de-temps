@@ -55,7 +55,7 @@ export function createReportRouter(storage: Storage) {
 
     // Try LLM-enhanced analysis if Ollama is available
     const ollama = await checkOllama();
-    const hasLLM = ollama.available && ollama.models.some(m => m.startsWith('llama'));
+    const hasLLM = ollama.available && ollama.models.some(m => m.startsWith('qwen') || m.startsWith('llama') || m.startsWith('mistral'));
     if (hasLLM && (unmatched.length > 0 || suggestedEntries.length > 0)) {
       try {
         const activitiesWithCustomer = activities.activities.map(a => {
@@ -63,10 +63,16 @@ export function createReportRouter(storage: Storage) {
           return { id: a.id, name: a.name, customerName: c?.name ?? '' };
         });
 
+        // Prepare audio transcripts for LLM context
+        const audioTranscripts = (tracking.audioSegments || [])
+          .filter((s: any) => s.hasSpeech && s.transcript)
+          .map((s: any) => ({ time: s.timestamp.slice(11, 16), text: s.transcript }));
+
         const llmResult = await analyzeReport({
           date: req.params.date,
           blocks: suggestedEntries.map(e => ({ app: '', title: e.description, totalMinutes: e.totalMinutes })),
           unmatched: unmatched.map(b => ({ app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes })),
+          audioTranscripts,
           activities: activitiesWithCustomer,
         });
 

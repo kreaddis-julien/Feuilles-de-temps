@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Activity, ActivitiesData, Customer, CustomersData, CustomerType } from '../types';
+import type { Activity, ActivitiesData, Customer, CustomersData, CustomerType, TrackingConfig } from '../types';
 import * as api from '../api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
+import { Monitor, Mic } from 'lucide-react';
 
 export default function SettingsPage() {
   const [activities, setActivities] = useState<ActivitiesData>({ activities: [] });
@@ -26,13 +27,43 @@ export default function SettingsPage() {
   const [editActName, setEditActName] = useState('');
   const [editActCustomerId, setEditActCustomerId] = useState('');
 
+  // Tracking
+  const [trackingConfig, setTrackingConfig] = useState<TrackingConfig>({ screenEnabled: true, micEnabled: false });
+  const [ollamaStatus, setOllamaStatus] = useState<{ available: boolean; models: string[] }>({ available: false, models: [] });
+  const [trackingStats, setTrackingStats] = useState<{ fileCount: number } | null>(null);
+
   const refresh = useCallback(async () => {
     const [a, c] = await Promise.all([api.getActivities(), api.getCustomers()]);
     setActivities(a);
     setCustomers(c);
   }, []);
 
+  const refreshTracking = useCallback(async () => {
+    try {
+      const [config, ollama] = await Promise.all([
+        api.getTrackingConfig(),
+        fetch(`${api.BASE}/tracking/ollama/status`).then(r => r.json()).catch(() => ({ available: false, models: [] })),
+      ]);
+      setTrackingConfig(config);
+      setOllamaStatus(ollama);
+      // Count tracking files
+      const dates = await api.getReportDates();
+      setTrackingStats({ fileCount: dates.length });
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { refreshTracking(); }, [refreshTracking]);
+
+  async function toggleScreen() {
+    const updated = await api.updateTrackingConfig({ screenEnabled: !trackingConfig.screenEnabled });
+    setTrackingConfig(updated);
+  }
+
+  async function toggleMic() {
+    const updated = await api.updateTrackingConfig({ micEnabled: !trackingConfig.micEnabled });
+    setTrackingConfig(updated);
+  }
 
   // --- Customers ---
   const handleCreateCustomer = async (e: React.FormEvent) => {
@@ -87,6 +118,75 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-10 animate-in fade-in duration-200">
+      {/* ===== Tracking ===== */}
+      <section className="space-y-6">
+        <h1 className="text-2xl font-semibold">Tracking</h1>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          {/* Screen toggle */}
+          <Card className="py-4 gap-0">
+            <CardContent className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Monitor className="h-5 w-5 text-muted-foreground" />
+                <div>
+                  <p className="text-sm font-medium">Tracking écran</p>
+                  <p className="text-xs text-muted-foreground">App active, titre, URL</p>
+                </div>
+              </div>
+              <button
+                onClick={toggleScreen}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  trackingConfig.screenEnabled ? 'bg-primary' : 'bg-muted'
+                }`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  trackingConfig.screenEnabled ? 'translate-x-6' : 'translate-x-1'
+                }`} />
+              </button>
+            </CardContent>
+          </Card>
+
+          {/* Mic toggle */}
+          <Card className="py-4 gap-0">
+            <CardContent className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Mic className="h-5 w-5 text-muted-foreground" />
+                <div>
+                  <p className="text-sm font-medium">Tracking micro</p>
+                  <p className="text-xs text-muted-foreground">Transcription via Whisper</p>
+                </div>
+              </div>
+              <button
+                onClick={toggleMic}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  trackingConfig.micEnabled ? 'bg-primary' : 'bg-muted'
+                }`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  trackingConfig.micEnabled ? 'translate-x-6' : 'translate-x-1'
+                }`} />
+              </button>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Status */}
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-muted-foreground">Ollama</span>
+            <span className={ollamaStatus.available ? 'text-green-600' : 'text-destructive'}>
+              {ollamaStatus.available ? `Connecté (${ollamaStatus.models.join(', ')})` : 'Non disponible'}
+            </span>
+          </div>
+          {trackingStats && (
+            <div className="flex items-center justify-between px-1">
+              <span className="text-muted-foreground">Données de tracking</span>
+              <span>{trackingStats.fileCount} jour(s)</span>
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* ===== Clients ===== */}
       <section className="space-y-6">
         <h1 className="text-2xl font-semibold">Clients</h1>

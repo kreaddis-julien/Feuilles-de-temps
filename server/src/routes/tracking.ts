@@ -22,7 +22,15 @@ export function createTrackingRouter(storage: Storage) {
   router.put('/config/current', async (req, res) => {
     const config = await storage.loadTrackingConfig();
     if (req.body.screenEnabled !== undefined) config.screenEnabled = req.body.screenEnabled;
-    if (req.body.micEnabled !== undefined) config.micEnabled = req.body.micEnabled;
+    if (req.body.micEnabled !== undefined) {
+      config.micEnabled = req.body.micEnabled;
+      // Kill any running sox process immediately when mic is disabled
+      if (!config.micEnabled) {
+        try {
+          await execFileAsync('pkill', ['-f', 'sox.*tempo-mic']);
+        } catch { /* no sox running, that's fine */ }
+      }
+    }
     await storage.saveTrackingConfig(config);
     res.json(config);
   });
@@ -96,12 +104,15 @@ export function createTrackingRouter(storage: Storage) {
     try {
       // Check if audio has actual speech (simple size heuristic: 30s of silence at 16kHz mono = ~960KB)
       // Real speech typically produces larger files due to higher amplitude
-      const whisperModel = path.join(os.homedir(), '.local/share/whisper-models/ggml-small.bin');
+      // Use the best available whisper model (prefer large-v3 > medium > small)
+      const modelsDir = path.join(os.homedir(), '.local/share/whisper-models');
+      let whisperModel = '';
+      for (const m of ['ggml-large-v3-turbo.bin', 'ggml-large-v3.bin', 'ggml-medium.bin', 'ggml-small.bin']) {
+        const p = path.join(modelsDir, m);
+        try { await fs.access(p); whisperModel = p; break; } catch { /* try next */ }
+      }
 
-      // Check model exists
-      try {
-        await fs.access(whisperModel);
-      } catch {
+      if (!whisperModel) {
         await fs.unlink(wavPath).catch(() => {});
         return res.status(503).json({ error: 'Whisper model not found' });
       }
@@ -112,7 +123,7 @@ export function createTrackingRouter(storage: Storage) {
         '-l', 'fr',
         '--no-timestamps',
         '-t', '4',
-      ], { timeout: 30000 });
+      ], { timeout: 60000 });
 
       const transcript = stdout
         .split('\n')
