@@ -296,25 +296,51 @@ return frontApp & "||" & frontAppId & "||" & winTitle
                 String::new()
             };
 
-            // For terminal apps (cmux, Terminal, iTerm), enrich title with project directory
+            // For terminal apps (cmux, Terminal, iTerm), enrich title with the active project directory
             let terminal_bundles = ["com.cmuxterm.app", "com.apple.Terminal", "com.googlecode.iterm2"];
             if terminal_bundles.contains(&bundle_id.as_str()) && url.is_empty() {
-                // Get unique project directories from foreground terminal processes
-                let projects = std::process::Command::new("bash")
+                // Get tty-to-project mapping from foreground terminal processes
+                let mapping = std::process::Command::new("bash")
                     .arg("-c")
-                    .arg("ps -eo pid,tty,stat 2>/dev/null | awk '$3 ~ /\\+/ && $2 != \"??\" {print $1}' | while read pid; do lsof -p $pid 2>/dev/null | awk '/cwd/ {print $NF}'; done | sort -u | while read d; do case \"$d\" in /|\"$HOME\") ;; *) basename \"$d\" ;; esac; done | sort -u | paste -sd ',' -")
+                    .arg("ps -eo pid,tty,stat 2>/dev/null | awk '$3 ~ /\\+/ && $2 != \"??\" {print $1, $2}' | while read pid tty; do cwd=$(lsof -p $pid 2>/dev/null | awk '/cwd/ {print $NF}'); if [ -n \"$cwd\" ] && [ \"$cwd\" != \"/\" ] && [ \"$cwd\" != \"$HOME\" ]; then echo \"$tty $(basename \"$cwd\")\"; fi; done | sort -u")
                     .output()
                     .ok()
                     .and_then(|o| String::from_utf8(o.stdout).ok())
-                    .map(|s| s.trim().to_string())
                     .unwrap_or_default();
 
-                if !projects.is_empty() {
-                    let clean_title = title.replace(|c: char| "⠀⣿✳⠐⠂⠈⠠⠄⠁".contains(c), "").trim().to_string();
+                // Try to find the project that best matches the tab name
+                let clean_title = title.replace(|c: char| "⠀⣿✳⠐⠂⠈⠠⠄⠁".contains(c), "").trim().to_string();
+                let tab_lower = clean_title.to_lowercase();
+
+                let mut best_project = String::new();
+                for line in mapping.lines() {
+                    let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                    if parts.len() == 2 {
+                        let proj = parts[1].trim();
+                        let proj_lower = proj.to_lowercase();
+                        // Match if tab name contains project name or vice versa
+                        if tab_lower.contains(&proj_lower) || proj_lower.contains(&tab_lower.replace(" #0", "").replace(" #1", "").replace(" #2", "")) {
+                            best_project = proj.to_string();
+                            break;
+                        }
+                    }
+                }
+
+                // If no specific match, list all projects as fallback
+                if best_project.is_empty() {
+                    let all_projects: Vec<&str> = mapping.lines()
+                        .filter_map(|l| l.splitn(2, ' ').nth(1))
+                        .collect();
+                    if !all_projects.is_empty() {
+                        best_project = all_projects.join(",");
+                    }
+                }
+
+                if !best_project.is_empty() {
                     title = if clean_title.is_empty() {
-                        format!("projets: {}", projects)
+                        format!("projet: {}", best_project)
                     } else {
-                        format!("{} [{}]", clean_title, projects)
+                        format!("{} [{}]", clean_title, best_project)
                     };
                 }
             }

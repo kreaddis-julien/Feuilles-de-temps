@@ -41,10 +41,11 @@ export async function generateWithLLM(prompt: string, model = 'qwen2.5:14b'): Pr
 
 export interface LLMReportInput {
   date: string;
-  blocks: { app: string; title: string; domain?: string; totalMinutes: number }[];
+  blocks: { app: string; title: string; domain?: string; totalMinutes: number; activityId?: string }[];
   unmatched: { app: string; title: string; domain?: string; totalMinutes: number }[];
   activities: { id: string; name: string; customerName: string }[];
   audioTranscripts?: { time: string; text: string }[];
+  recentTimesheets?: { date: string; activityId: string; activityLabel: string; description: string; minutes: number }[];
 }
 
 export interface LLMSuggestedEntry {
@@ -63,7 +64,7 @@ export async function analyzeReport(input: LLMReportInput, model = 'qwen2.5:14b'
 
   const blocksList = input.blocks
     .filter(b => b.totalMinutes >= 1)
-    .map(b => `- ${b.app} | ${b.title} ${b.domain ? `(${b.domain})` : ''} | ${b.totalMinutes}min`)
+    .map(b => `- [activityId: "${b.activityId || ''}"] ${b.app} | titres fenêtres: ${b.title} | ${b.totalMinutes}min`)
     .join('\n');
 
   const unmatchedList = input.unmatched
@@ -74,40 +75,40 @@ export async function analyzeReport(input: LLMReportInput, model = 'qwen2.5:14b'
     ? `\nTRANSCRIPTIONS AUDIO (micro, conversations captées) :\n${input.audioTranscripts.map(a => `- [${a.time}] ${a.text}`).join('\n')}\n`
     : '';
 
-  const prompt = `Tu es un assistant qui analyse l'activité d'un employé pour l'aider à remplir ses feuilles de temps. L'employé travaille dans une société de services informatiques et fait du développement Odoo, du support, de la gestion de projet.
+  const historySection = input.recentTimesheets?.length
+    ? `\nEXEMPLES DE TIMESHEETS RÉCENTS (pour apprendre le style de l'utilisateur) :\n${input.recentTimesheets.map(t => `- [${t.date}] ${t.activityLabel} | "${t.description}" | ${t.minutes}min`).join('\n')}\n`
+    : '';
 
-Voici les activités/clients configurés dans le système :
+  const prompt = `Tu es un assistant qui analyse l'activité écran d'un employé d'une société de services informatiques (développement Odoo, support, gestion de projet) pour remplir ses feuilles de temps.
+
+ACTIVITÉS DISPONIBLES (utilise UNIQUEMENT ces IDs) :
 ${activitiesList}
 
-Voici l'activité écran du ${input.date} :
-
-BLOCS DÉJÀ IDENTIFIÉS :
-${blocksList}
-
-BLOCS NON IDENTIFIÉS :
+ACTIVITÉ ÉCRAN DU ${input.date} :
 ${unmatchedList}
-${audioSection}
-Analyse ces données et retourne un JSON avec :
-1. "summary" : un résumé en français de la journée en 2-3 phrases. Mentionne les clients et projets identifiés.
-2. "suggestions" : une liste d'entrées de timesheet suggérées pour les blocs NON IDENTIFIÉS. Pour chaque suggestion :
-   - Croise les infos écran ET audio pour deviner le client/projet
-   - Les noms de répertoires (ex: "psbe-gemaddis-erp", "baouw") correspondent souvent à des projets clients
-   - Les conversations audio mentionnant des noms de clients/tickets aident à identifier l'activité
-   - Essaie de deviner quel activityId correspond. Si tu ne peux pas deviner, mets activityId à "".
+${audioSection}${historySection}
+RÈGLES DE CORRESPONDANCE :
+- Les noms entre crochets [xxx] sont des répertoires de projets. "baouw" = Baouw, "psbe-gemaddis-erp" ou "gemaddis" = GemAddis, "Feuilles-de-temps" ou "feuille-de-temps" = travail interne KreAddis.
+- Les URLs contenant un nom de client identifient le client (ex: gemaddis.odoo.com = GemAddis, baouw = Baouw).
+- "cmux" et "Claude Code" sont des outils de développement — le projet dépend du répertoire entre crochets.
+- "timesheet" et "Tempo" = travail interne sur l'outil de suivi du temps.
+- NE COPIE PAS les titres de fenêtres dans les descriptions. Écris ce que la personne faisait (ex: "Développement site web", "Support client", "Migration DHL").
 
-Chaque suggestion a : activityId (string), description (string courte en français), totalMinutes (number).
+Retourne UNIQUEMENT un JSON :
+{"summary":"résumé français 2-3 phrases","suggestions":[{"activityId":"ID_existant","description":"description métier courte","totalMinutes":nombre}]}
 
-Réponds UNIQUEMENT avec le JSON, sans commentaire ni markdown.
-
-Exemple de réponse :
-{"summary":"Journée sur le projet Baouw et support GemAddis","suggestions":[{"activityId":"abc123","description":"Développement","totalMinutes":15}]}`;
+IMPORTANT :
+- activityId DOIT être un ID de la liste ci-dessus. Si tu ne sais pas, mets "".
+- Regroupe les blocs du même client/projet en UNE seule suggestion.
+- La somme des totalMinutes doit être cohérente avec l'activité écran.
+- N'invente PAS de données. Base-toi uniquement sur les blocs fournis.`;
 
   const response = await generateWithLLM(prompt, model);
 
   // Parse JSON from response (LLM might wrap it in markdown)
   const jsonMatch = response.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    return { summary: '', suggestions: [] };
+    return { summary: '', descriptions: {}, suggestions: [] };
   }
 
   try {

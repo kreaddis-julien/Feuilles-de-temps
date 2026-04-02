@@ -32,6 +32,8 @@ export default function ReportPage() {
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
   const [audioSegments, setAudioSegments] = useState<AudioSegment[]>([]);
   const [showAudio, setShowAudio] = useState(false);
+  // Editable unmatched blocks
+  const [editUnmatched, setEditUnmatched] = useState<{ app: string; title: string; totalMinutes: number; activityId: string; description: string; selected: boolean }[]>([]);
 
   const refreshDates = useCallback(async () => {
     try {
@@ -58,6 +60,14 @@ export default function ReportPage() {
       }
       setReport(r);
       setEditEntries(r.suggestedEntries.map(e => ({ ...e, selected: true })));
+      setEditUnmatched(r.unmatched.map(b => ({
+        app: b.app,
+        title: b.title,
+        totalMinutes: b.totalMinutes,
+        activityId: '',
+        description: `${b.app}: ${b.title}`,
+        selected: false,
+      })));
       // Load audio segments
       const tracking = await api.getTracking(date);
       setAudioSegments(tracking.audioSegments.filter(s => s.hasSpeech));
@@ -88,11 +98,23 @@ export default function ReportPage() {
       const r = await api.generateReport(selectedDate);
       setReport(r);
       setEditEntries(r.suggestedEntries.map(e => ({ ...e, selected: true })));
+      setEditUnmatched(r.unmatched.map(b => ({
+        app: b.app,
+        title: b.title,
+        totalMinutes: b.totalMinutes,
+        activityId: '',
+        description: `${b.app}: ${b.title}`,
+        selected: false,
+      })));
     } catch {
       setReport(null);
     } finally {
       setLoading(false);
     }
+  }
+
+  function updateUnmatched(index: number, updates: Partial<typeof editUnmatched[0]>) {
+    setEditUnmatched(prev => prev.map((e, i) => i === index ? { ...e, ...updates } : e));
   }
 
   function activityLabel(activityId: string): string {
@@ -106,14 +128,21 @@ export default function ReportPage() {
     if (!selectedDate || !report) return;
     setValidating(true);
     try {
-      const entries = editEntries
+      const suggested = editEntries
         .filter(e => e.selected)
         .map(e => ({
           activityId: e.activityId,
           description: e.description,
           roundedMinutes: e.roundedMinutes,
         }));
-      await api.validateReport(selectedDate, entries);
+      const unmatched = editUnmatched
+        .filter(e => e.selected && e.activityId)
+        .map(e => ({
+          activityId: e.activityId,
+          description: e.description,
+          roundedMinutes: Math.max(15, Math.ceil(e.totalMinutes / 15) * 15),
+        }));
+      await api.validateReport(selectedDate, [...suggested, ...unmatched]);
       setReport({ ...report, status: 'validated' });
       await refreshDates();
     } finally {
@@ -176,12 +205,25 @@ export default function ReportPage() {
           <span className="text-xs font-medium text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full">Validé</span>
         )}
         <Button variant="outline" size="sm" onClick={regenerateReport} disabled={loading}>
-          Regénérer
+          {loading ? (
+            <>
+              <div className="h-3.5 w-3.5 rounded-full border-2 border-muted animate-spin border-t-foreground" />
+              Génération...
+            </>
+          ) : 'Regénérer'}
         </Button>
       </div>
 
       {loading ? (
-        <p className="text-center text-muted-foreground py-12">Generation du rapport...</p>
+        <div className="flex flex-col items-center gap-4 py-16">
+          <div className="relative">
+            <div className="h-10 w-10 rounded-full border-4 border-muted animate-spin border-t-primary" />
+          </div>
+          <div className="text-center space-y-1">
+            <p className="text-sm font-medium">Génération du rapport en cours...</p>
+            <p className="text-xs text-muted-foreground">Analyse des données avec l'IA, cela peut prendre 20-30 secondes</p>
+          </div>
+        </div>
       ) : !report ? (
         <p className="text-center text-muted-foreground py-12">Aucune donnee disponible.</p>
       ) : (
@@ -273,21 +315,57 @@ export default function ReportPage() {
           )}
 
           {/* Unmatched blocks */}
-          {report.unmatched.length > 0 && (
+          {editUnmatched.length > 0 && (
             <section className="space-y-3">
               <h2 className="text-lg font-semibold flex items-center gap-2">
                 <AlertCircle className="h-4 w-4 text-warning" />
-                Non identifiees
+                Non identifiées ({editUnmatched.length})
               </h2>
-              <div className="space-y-1">
-                {report.unmatched.map((block, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm px-3 py-2 rounded-lg bg-muted/50">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-muted-foreground shrink-0">{block.from.slice(11, 16)} → {block.to.slice(11, 16)}</span>
-                      <span className="truncate">{block.app}: {block.title || '(sans titre)'}</span>
-                    </div>
-                    <span className="text-muted-foreground shrink-0 ml-2">{formatDuration(block.totalMinutes)}</span>
-                  </div>
+              <div className="space-y-2">
+                {editUnmatched.map((block, i) => (
+                  <Card key={i} className={`py-3 gap-0 ${block.selected ? '' : 'opacity-60'}`}>
+                    <CardContent className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={block.selected}
+                            onChange={e => updateUnmatched(i, { selected: e.target.checked })}
+                            className="h-4 w-4 rounded accent-primary cursor-pointer"
+                          />
+                          <span className="text-sm"><strong>{block.app}</strong>: {block.title || '(sans titre)'}</span>
+                        </div>
+                        <span className="font-mono text-sm tabular-nums shrink-0">{formatDuration(block.totalMinutes)}</span>
+                      </div>
+                      {block.selected && (
+                        <div className="pl-6 flex items-center gap-2">
+                          <select
+                            className="h-8 rounded-md border border-input bg-transparent px-2 text-sm flex-1"
+                            value={block.activityId}
+                            onChange={e => updateUnmatched(i, { activityId: e.target.value })}
+                          >
+                            <option value="">-- Assigner une activité --</option>
+                            {activities
+                              .map(a => {
+                                const c = customers.find(c => c.id === a.customerId);
+                                const label = c ? `${c.name} - ${a.name}` : a.name;
+                                return { ...a, label };
+                              })
+                              .sort((a, b) => a.label.localeCompare(b.label))
+                              .map(a => (
+                                <option key={a.id} value={a.id}>{a.label}</option>
+                              ))}
+                          </select>
+                          <input
+                            className="h-8 rounded-md border border-input bg-transparent px-2 text-sm flex-1"
+                            value={block.description}
+                            onChange={e => updateUnmatched(i, { description: e.target.value })}
+                            placeholder="Description..."
+                          />
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             </section>
@@ -318,11 +396,11 @@ export default function ReportPage() {
           )}
 
           {/* Validate button */}
-          {report.status !== 'validated' && editEntries.some(e => e.selected) && (
+          {report.status !== 'validated' && (editEntries.some(e => e.selected) || editUnmatched.some(e => e.selected && e.activityId)) && (
             <div className="text-center pt-2">
               <Button size="lg" onClick={handleValidate} disabled={validating} className="text-base font-semibold px-8">
                 <Check className="h-5 w-5" />
-                Tout valider ({editEntries.filter(e => e.selected).length} entree(s))
+                Tout valider ({editEntries.filter(e => e.selected).length + editUnmatched.filter(e => e.selected && e.activityId).length} entrée(s))
               </Button>
             </div>
           )}

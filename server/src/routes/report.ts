@@ -28,99 +28,151 @@ export function createReportRouter(storage: Storage) {
 
     // Aggregate sessions by app+title into time blocks
     const blocks = aggregateSessions(tracking.screenSessions);
+    const totalTrackedMinutes = blocks.reduce((s, b) => s + b.totalMinutes, 0);
 
-    // Try to match blocks to activities/customers using URL patterns and title keywords
-    const matchedBlocks = blocks.map(block => {
-      const match = tryMatch(block, activities.activities, customers.customers);
-      return { ...block, ...match };
+    const activitiesWithCustomer = activities.activities.map(a => {
+      const c = customers.customers.find(c => c.id === a.customerId);
+      return { id: a.id, name: a.name, customerName: c?.name ?? '' };
     });
 
-    // Group by matched activity to create suggested entries
-    const suggestedEntries = buildSuggestedEntries(matchedBlocks);
-
-    // Build unmatched list (only blocks with at least 1 min)
-    const unmatched = matchedBlocks
-      .filter(b => !b.activityId && b.totalMinutes >= 1)
-      .map(b => ({
-        from: b.from,
-        to: b.to,
-        app: b.app,
-        title: b.title,
-        url: b.url,
-        domain: b.domain,
-        totalMinutes: b.totalMinutes,
-      }));
-
     let summary = '';
+    let suggestedEntries: SuggestedEntry[] = [];
+    let unmatched: typeof blocks = [];
+    let aiEnhanced = false;
 
-    // Try LLM-enhanced analysis if Ollama is available
+    // Try LLM-first approach
     const ollama = await checkOllama();
     const hasLLM = ollama.available && ollama.models.some(m => m.startsWith('qwen') || m.startsWith('llama') || m.startsWith('mistral'));
-    if (hasLLM && (unmatched.length > 0 || suggestedEntries.length > 0)) {
-      try {
-        const activitiesWithCustomer = activities.activities.map(a => {
-          const c = customers.customers.find(c => c.id === a.customerId);
-          return { id: a.id, name: a.name, customerName: c?.name ?? '' };
-        });
 
-        // Prepare audio transcripts for LLM context
+    if (hasLLM) {
+      try {
         const audioTranscripts = (tracking.audioSegments || [])
           .filter((s: any) => s.hasSpeech && s.transcript)
           .map((s: any) => ({ time: s.timestamp.slice(11, 16), text: s.transcript }));
 
-        const llmResult = await analyzeReport({
-          date: req.params.date,
-          blocks: suggestedEntries.map(e => ({ app: '', title: e.description, totalMinutes: e.totalMinutes })),
-          unmatched: unmatched.map(b => ({ app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes })),
-          audioTranscripts,
-          activities: activitiesWithCustomer,
-        });
-
-        summary = llmResult.summary;
-
-        // Merge LLM suggestions into unmatched → suggested
-        for (const s of llmResult.suggestions) {
-          if (s.activityId) {
-            // Move from unmatched to suggested
-            const existing = suggestedEntries.find(e => e.activityId === s.activityId);
-            if (existing) {
-              existing.totalMinutes += s.totalMinutes;
-              existing.roundedMinutes = Math.max(15, Math.ceil(existing.totalMinutes / 15) * 15);
-              if (s.description && !existing.description.includes(s.description)) {
-                existing.description += ', ' + s.description;
-              }
-            } else {
-              suggestedEntries.push({
-                activityId: s.activityId,
-                description: s.description,
-                totalMinutes: s.totalMinutes,
-                roundedMinutes: Math.max(15, Math.ceil(s.totalMinutes / 15) * 15),
-                confidence: 0.5,
-                blockCount: 1,
+        // Load recent timesheets as examples
+        const recentExamples: { date: string; activityId: string; activityLabel: string; description: string; minutes: number }[] = [];
+        const allDates = await storage.listDates();
+        for (const d of allDates.slice(-7)) {
+          if (d === req.params.date) continue;
+          const day = await storage.loadTimesheet(d);
+          for (const e of day.entries.filter(e => e.status === 'completed' && e.activityId)) {
+            const act = activitiesWithCustomer.find(a => a.id === e.activityId);
+            if (act) {
+              recentExamples.push({
+                date: d, activityId: e.activityId,
+                activityLabel: `${act.customerName} - ${act.name}`,
+                description: e.description, minutes: e.roundedMinutes,
               });
             }
           }
         }
 
-        // Remove matched items from unmatched
-        const matchedByLLM = new Set(llmResult.suggestions.filter(s => s.activityId).map(s => s.description));
-        // Don't filter unmatched by description match — keep them for manual review
+        // Send ALL blocks to LLM (no pre-matching)
+        const llmResult = await analyzeReport({
+          date: req.params.date,
+          blocks: [], // No pre-matched blocks
+          unmatched: blocks.map(b => ({ app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes })),
+          audioTranscripts,
+          activities: activitiesWithCustomer,
+          recentTimesheets: recentExamples.slice(-20),
+        });
+
+        summary = llmResult.summary;
+        aiEnhanced = true;
+
+        // Build suggested entries from LLM suggestions (only valid activityIds)
+        const validActivityIds = new Set(activities.activities.map(a => a.id));
+        const byActivity = new Map<string, { totalMin: number; description: string; customerName?: string }>();
+
+        for (const s of llmResult.suggestions) {
+          if (s.activityId && validActivityIds.has(s.activityId)) {
+            const existing = byActivity.get(s.activityId);
+            if (existing) {
+              existing.totalMin += s.totalMinutes;
+              if (s.description && !existing.description.includes(s.description)) {
+                existing.description += ', ' + s.description;
+              }
+            } else {
+              const act = activitiesWithCustomer.find(a => a.id === s.activityId);
+              byActivity.set(s.activityId, {
+                totalMin: s.totalMinutes,
+                description: s.description,
+                customerName: act?.customerName,
+              });
+            }
+          }
+        }
+
+        for (const [activityId, data] of byActivity) {
+          const roundedMinutes = Math.max(15, Math.ceil(data.totalMin / 15) * 15);
+          suggestedEntries.push({
+            activityId,
+            customerName: data.customerName,
+            description: data.description,
+            totalMinutes: data.totalMin,
+            roundedMinutes,
+            confidence: 0.8,
+            blockCount: 1,
+          });
+        }
+
+        // Unmatched = blocks not covered by LLM suggestions
+        const matchedMinutes = suggestedEntries.reduce((s, e) => s + e.totalMinutes, 0);
+        if (matchedMinutes < totalTrackedMinutes) {
+          // Find blocks that weren't matched by the LLM
+          const suggestedApps = new Set(llmResult.suggestions.map(s => s.description?.toLowerCase()));
+          for (const b of blocks) {
+            const isMatched = llmResult.suggestions.some(s =>
+              s.activityId && validActivityIds.has(s.activityId) &&
+              (b.title.toLowerCase().includes(s.description?.toLowerCase() || '___') ||
+               s.description?.toLowerCase().includes(b.app.toLowerCase()))
+            );
+            if (!isMatched && b.totalMinutes >= 1) {
+              // Check if it's already covered by a matched entry (by app/domain)
+              const coveredByMatch = suggestedEntries.some(e => {
+                const act = activitiesWithCustomer.find(a => a.id === e.activityId);
+                return act && (b.title.toLowerCase().includes(act.customerName.toLowerCase()) ||
+                               (b.domain && b.domain.includes(act.customerName.toLowerCase())));
+              });
+              if (!coveredByMatch) {
+                unmatched.push(b);
+              }
+            }
+          }
+        }
       } catch (err) {
         console.error('[report] LLM analysis failed:', err);
-        // Continue with basic report
+        // Fallback to basic matching
       }
     }
+
+    // Fallback: basic matching if LLM failed or unavailable
+    if (suggestedEntries.length === 0) {
+      const matchedBlocks = blocks.map(block => {
+        const match = tryMatch(block, activities.activities, customers.customers);
+        return { ...block, ...match };
+      });
+      suggestedEntries = buildSuggestedEntries(matchedBlocks);
+      unmatched = matchedBlocks
+        .filter(b => !b.activityId && b.totalMinutes >= 1);
+    }
+
+    suggestedEntries.sort((a, b) => b.totalMinutes - a.totalMinutes);
 
     const report = {
       date: req.params.date,
       generatedAt: new Date().toISOString(),
       status: 'pending' as const,
       summary,
-      blocks: matchedBlocks,
+      blocks,
       suggestedEntries,
-      unmatched,
-      totalTrackedMinutes: blocks.reduce((s, b) => s + b.totalMinutes, 0),
-      aiEnhanced: hasLLM,
+      unmatched: unmatched.map(b => ({
+        from: b.from, to: b.to, app: b.app, title: b.title,
+        url: b.url, domain: b.domain, totalMinutes: b.totalMinutes,
+      })),
+      totalTrackedMinutes,
+      aiEnhanced,
     };
 
     tracking.report = report;
@@ -222,8 +274,12 @@ function aggregateSessions(sessions: ScreenSession[]): AggregatedBlock[] {
     if (domain) {
       key = `${s.app}|${domain}`;
     } else {
-      // Normalize terminal titles: strip leading spinner chars (⠐⠂✳⠈⠠⠄⠁ etc.)
-      const cleanTitle = s.title.replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁]\s*/, '').trim();
+      // Normalize terminal titles: strip spinner chars AND project brackets
+      // "✳ feuille-de-temps #0 [Feuilles-de-temps,baouw]" → "feuille-de-temps #0"
+      const cleanTitle = s.title
+        .replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁]\s*/, '')  // Remove spinner chars
+        .replace(/\s*\[[^\]]*\]\s*$/, '')         // Remove trailing [project,names]
+        .trim();
       key = cleanTitle ? `${s.app}|${cleanTitle}` : s.app;
     }
 
@@ -269,32 +325,62 @@ function tryMatch(
 ): { activityId?: string; customerName?: string; confidence: number } {
   const domain = (block.domain ?? '').toLowerCase();
   const url = (block.url ?? '').toLowerCase();
-  const title = block.title.toLowerCase();
-  const app = block.app.toLowerCase();
+  const fullTitle = block.title.toLowerCase();
+  // Title without brackets (for primary matching)
+  const titleClean = block.title.replace(/\s*\[[^\]]*\]\s*/g, '').toLowerCase();
+  // Project names from brackets (for fallback matching)
+  const bracketMatch = block.title.match(/\[([^\]]+)\]/);
+  const projectNames = bracketMatch
+    ? bracketMatch[1].split(',').map(p => p.trim().toLowerCase())
+    : [];
 
-  // Try to match by domain or title to customer name
+  // Priority 1: Match by domain (most reliable)
   for (const customer of customers) {
     const custLower = customer.name.toLowerCase();
-    // Check domain first (most reliable)
     if (domain && domain.includes(custLower)) {
       const activity = activities.find(a => a.customerId === customer.id);
       if (activity) {
         return { activityId: activity.id, customerName: customer.name, confidence: 0.9 };
       }
     }
-    // Check title
-    if (title.includes(custLower)) {
+  }
+
+  // Priority 2: Match tab/window title (without brackets) to customer
+  for (const customer of customers) {
+    const custLower = customer.name.toLowerCase();
+    if (titleClean.includes(custLower)) {
       const activity = activities.find(a => a.customerId === customer.id);
       if (activity) {
-        return { activityId: activity.id, customerName: customer.name, confidence: 0.7 };
+        return { activityId: activity.id, customerName: customer.name, confidence: 0.8 };
       }
     }
   }
 
-  // Try to match activity name in domain, title, or URL
+  // Priority 3: Match project names from brackets to customer (fallback)
+  // Only match if there's exactly ONE customer match (avoid ambiguity)
+  if (projectNames.length > 0) {
+    const matches: { activityId: string; customerName: string }[] = [];
+    for (const customer of customers) {
+      const custLower = customer.name.toLowerCase();
+      for (const proj of projectNames) {
+        if (proj.includes(custLower) || custLower.includes(proj)) {
+          const activity = activities.find(a => a.customerId === customer.id);
+          if (activity) {
+            matches.push({ activityId: activity.id, customerName: customer.name });
+            break;
+          }
+        }
+      }
+    }
+    if (matches.length === 1) {
+      return { ...matches[0], confidence: 0.6 };
+    }
+  }
+
+  // Priority 4: Match activity name in domain, title, or URL
   for (const activity of activities) {
     const actLower = activity.name.toLowerCase();
-    if (domain.includes(actLower) || title.includes(actLower) || url.includes(actLower)) {
+    if (domain.includes(actLower) || fullTitle.includes(actLower) || url.includes(actLower)) {
       const customer = customers.find(c => c.id === activity.customerId);
       return { activityId: activity.id, customerName: customer?.name, confidence: 0.6 };
     }
@@ -320,7 +406,12 @@ function buildSuggestedEntries(blocks: (AggregatedBlock & { activityId?: string;
     if (!b.activityId) continue;
     const existing = byActivity.get(b.activityId) || { totalSecs: 0, titles: new Set(), confidence: 0, customerName: b.customerName, count: 0 };
     existing.totalSecs += b.totalSeconds;
-    if (b.title) existing.titles.add(b.title);
+    // Clean title for description: remove bracket content, keep meaningful part
+    const cleanTitle = b.title
+      .replace(/\s*\[[^\]]*\]\s*/g, '')  // Remove [project,names]
+      .replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁]\s*/, '') // Remove spinner chars
+      .trim();
+    if (cleanTitle && cleanTitle.length > 3) existing.titles.add(cleanTitle);
     existing.confidence = Math.max(existing.confidence, b.confidence);
     existing.count++;
     byActivity.set(b.activityId, existing);
@@ -331,7 +422,9 @@ function buildSuggestedEntries(blocks: (AggregatedBlock & { activityId?: string;
     const totalMinutes = Math.round(data.totalSecs / 60);
     // Skip activities with less than 2 minutes total (likely just quick glances)
     if (totalMinutes < 2) continue;
-    const titles = [...data.titles].slice(0, 3).join(', ');
+    // Keep raw titles as context for LLM, but use a clean default description
+    const rawTitles = [...data.titles].slice(0, 5);
+    const titles = rawTitles.join(', ');
     const roundedMinutes = Math.max(15, Math.ceil(totalMinutes / 15) * 15);
     entries.push({
       activityId,
