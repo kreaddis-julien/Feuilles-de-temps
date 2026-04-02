@@ -308,7 +308,7 @@ export default function ReportPage() {
                 <div className="space-y-1">
                   {audioSegments.map((seg, i) => (
                     <div key={i} className="flex gap-3 text-sm px-3 py-2 rounded-lg bg-muted/50">
-                      <span className="text-muted-foreground shrink-0 tabular-nums">{seg.timestamp.slice(11, 16)}</span>
+                      <span className="text-muted-foreground shrink-0 tabular-nums">{new Date(seg.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
                       <span>{seg.transcript}</span>
                     </div>
                   ))}
