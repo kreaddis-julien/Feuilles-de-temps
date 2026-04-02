@@ -19,7 +19,7 @@ export async function checkOllama(): Promise<OllamaStatus> {
   }
 }
 
-export async function generateWithLLM(prompt: string, model = 'llama3.1'): Promise<string> {
+export async function generateWithLLM(prompt: string, model = 'qwen2.5:14b'): Promise<string> {
   const resp = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -44,6 +44,7 @@ export interface LLMReportInput {
   blocks: { app: string; title: string; domain?: string; totalMinutes: number }[];
   unmatched: { app: string; title: string; domain?: string; totalMinutes: number }[];
   activities: { id: string; name: string; customerName: string }[];
+  audioTranscripts?: { time: string; text: string }[];
 }
 
 export interface LLMSuggestedEntry {
@@ -52,7 +53,7 @@ export interface LLMSuggestedEntry {
   totalMinutes: number;
 }
 
-export async function analyzeReport(input: LLMReportInput, model = 'llama3.1'): Promise<{
+export async function analyzeReport(input: LLMReportInput, model = 'qwen2.5:14b'): Promise<{
   summary: string;
   suggestions: LLMSuggestedEntry[];
 }> {
@@ -69,7 +70,11 @@ export async function analyzeReport(input: LLMReportInput, model = 'llama3.1'): 
     .map(b => `- ${b.app} | ${b.title} ${b.domain ? `(${b.domain})` : ''} | ${b.totalMinutes}min`)
     .join('\n');
 
-  const prompt = `Tu es un assistant qui analyse l'activité d'un employé pour l'aider à remplir ses feuilles de temps.
+  const audioSection = input.audioTranscripts?.length
+    ? `\nTRANSCRIPTIONS AUDIO (micro, conversations captées) :\n${input.audioTranscripts.map(a => `- [${a.time}] ${a.text}`).join('\n')}\n`
+    : '';
+
+  const prompt = `Tu es un assistant qui analyse l'activité d'un employé pour l'aider à remplir ses feuilles de temps. L'employé travaille dans une société de services informatiques et fait du développement Odoo, du support, de la gestion de projet.
 
 Voici les activités/clients configurés dans le système :
 ${activitiesList}
@@ -81,10 +86,14 @@ ${blocksList}
 
 BLOCS NON IDENTIFIÉS :
 ${unmatchedList}
-
+${audioSection}
 Analyse ces données et retourne un JSON avec :
-1. "summary" : un résumé en français de la journée en 2-3 phrases
-2. "suggestions" : une liste d'entrées de timesheet suggérées pour les blocs NON IDENTIFIÉS. Pour chaque suggestion, essaie de deviner quel activityId correspond en te basant sur le nom de l'app, le titre, le domaine. Si tu ne peux pas deviner, mets activityId à "".
+1. "summary" : un résumé en français de la journée en 2-3 phrases. Mentionne les clients et projets identifiés.
+2. "suggestions" : une liste d'entrées de timesheet suggérées pour les blocs NON IDENTIFIÉS. Pour chaque suggestion :
+   - Croise les infos écran ET audio pour deviner le client/projet
+   - Les noms de répertoires (ex: "psbe-gemaddis-erp", "baouw") correspondent souvent à des projets clients
+   - Les conversations audio mentionnant des noms de clients/tickets aident à identifier l'activité
+   - Essaie de deviner quel activityId correspond. Si tu ne peux pas deviner, mets activityId à "".
 
 Chaque suggestion a : activityId (string), description (string courte en français), totalMinutes (number).
 

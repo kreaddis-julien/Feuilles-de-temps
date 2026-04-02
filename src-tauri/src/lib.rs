@@ -269,7 +269,7 @@ return frontApp & "||" & frontAppId & "||" & winTitle
 
             let app_name = parts[0].to_string();
             let bundle_id = parts[1].to_string();
-            let title = parts[2].to_string();
+            let mut title = parts[2].to_string();
 
             // Get browser URL if Chrome or Safari
             let url = if bundle_id == "com.google.Chrome" {
@@ -295,6 +295,29 @@ return frontApp & "||" & frontAppId & "||" & winTitle
             } else {
                 String::new()
             };
+
+            // For terminal apps (cmux, Terminal, iTerm), enrich title with project directory
+            let terminal_bundles = ["com.cmuxterm.app", "com.apple.Terminal", "com.googlecode.iterm2"];
+            if terminal_bundles.contains(&bundle_id.as_str()) && url.is_empty() {
+                // Get unique project directories from foreground terminal processes
+                let projects = std::process::Command::new("bash")
+                    .arg("-c")
+                    .arg("ps -eo pid,tty,stat 2>/dev/null | awk '$3 ~ /\\+/ && $2 != \"??\" {print $1}' | while read pid; do lsof -p $pid 2>/dev/null | awk '/cwd/ {print $NF}'; done | sort -u | while read d; do case \"$d\" in /|\"$HOME\") ;; *) basename \"$d\" ;; esac; done | sort -u | paste -sd ',' -")
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default();
+
+                if !projects.is_empty() {
+                    let clean_title = title.replace(|c: char| "⠀⣿✳⠐⠂⠈⠠⠄⠁".contains(c), "").trim().to_string();
+                    title = if clean_title.is_empty() {
+                        format!("projets: {}", projects)
+                    } else {
+                        format!("{} [{}]", clean_title, projects)
+                    };
+                }
+            }
 
             // Check idle time (seconds since last user input)
             let idle_script = r#"do shell script "ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}'"#;

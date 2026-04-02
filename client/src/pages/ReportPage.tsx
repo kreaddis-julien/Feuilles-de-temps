@@ -68,6 +68,19 @@ export default function ReportPage() {
     }
   }
 
+  // Auto-refresh tracking data when viewing a report
+  useEffect(() => {
+    if (!selectedDate || loading) return;
+    const refreshTracking = async () => {
+      try {
+        const tracking = await api.getTracking(selectedDate);
+        setAudioSegments(tracking.audioSegments.filter(s => s.hasSpeech));
+      } catch { /* ignore */ }
+    };
+    const id = setInterval(refreshTracking, 5000);
+    return () => clearInterval(id);
+  }, [selectedDate, loading]);
+
   async function regenerateReport() {
     if (!selectedDate) return;
     setLoading(true);
