@@ -28,6 +28,63 @@ export function createReportRouter(storage: Storage) {
 
     // Aggregate sessions by app+title into time blocks
     const blocks = aggregateSessions(tracking.screenSessions);
+
+    // Enrich with Claude Code prompt time — estimate 3 min per prompt as active work
+    const claudeTimeByProject: Record<string, number> = {};
+    for (const p of (tracking.claudePrompts || []) as any[]) {
+      if (p.project) {
+        claudeTimeByProject[p.project] = (claudeTimeByProject[p.project] || 0) + 3;
+      }
+    }
+    // Add Claude time as virtual blocks if the project has a mapping
+    const config2 = await storage.loadTrackingConfig() as any;
+    const projMap = config2.projectMap || {};
+    for (const [project, minutes] of Object.entries(claudeTimeByProject)) {
+      if (projMap[project]) {
+        // Check if this project already has screen time
+        const hasScreenTime = blocks.some(b => {
+          const bracket = b.title.match(/\[([^\]]+)\]/);
+          return bracket && bracket[1].trim() === project;
+        });
+        if (!hasScreenTime) {
+          // Add virtual block for Claude Code time on this project
+          blocks.push({
+            from: '', to: '', app: 'Claude Code', title: `[${project}]`,
+            totalSeconds: minutes * 60, totalMinutes: minutes,
+          });
+        }
+      }
+    }
+
+    // Add audio conversation time as virtual blocks
+    // Each audio segment represents 30s of active conversation
+    // Try to attribute to the screen session that was active at the same time
+    for (const seg of (tracking.audioSegments || []) as any[]) {
+      if (!seg.hasSpeech || !seg.transcript) continue;
+      const segTime = new Date(seg.timestamp).getTime();
+
+      // Find what was on screen at this time
+      let matchedScreen = false;
+      for (const s of tracking.screenSessions) {
+        const sFrom = new Date(s.from).getTime();
+        const sUntil = new Date(s.until).getTime();
+        if (segTime >= sFrom - 30000 && segTime <= sUntil + 30000) {
+          // Audio happened during this screen session — already counted
+          matchedScreen = true;
+          break;
+        }
+      }
+
+      if (!matchedScreen) {
+        // Audio during idle/no screen activity — add as "conversation" block
+        blocks.push({
+          from: seg.timestamp, to: seg.timestamp,
+          app: 'Conversation', title: seg.transcript.slice(0, 60),
+          totalSeconds: 30, totalMinutes: 1,
+        });
+      }
+    }
+
     const totalTrackedMinutes = blocks.reduce((s, b) => s + b.totalMinutes, 0);
 
     const activitiesWithCustomer = activities.activities.map(a => {
@@ -505,13 +562,30 @@ function tryMatch(
     }
   }
 
-  // Priority 2: Match tab/window title (without brackets) to customer
-  for (const customer of customers) {
-    const custLower = customer.name.toLowerCase();
-    if (titleClean.includes(custLower)) {
-      const activity = activities.find(a => a.customerId === customer.id);
-      if (activity) {
-        return { activityId: activity.id, customerName: customer.name, confidence: 0.8 };
+  // Priority 2: Match by client-specific domains (e.g. gemaddis-erp.odoo.com, baouw.odoo.com)
+  if (domain && !domain.includes('kreaddis.com') && !domain.includes('google.com') && !domain.includes('microsoft.com') && !domain.includes('github.com')) {
+    for (const customer of customers) {
+      const custLower = customer.name.toLowerCase();
+      if (domain.includes(custLower)) {
+        const activity = activities.find(a => a.customerId === customer.id);
+        if (activity) {
+          return { activityId: activity.id, customerName: customer.name, confidence: 0.85 };
+        }
+      }
+    }
+  }
+
+  // Priority 3: Match tab/window title to customer — for Meet/Teams (meeting titles) and non-ERP
+  const isInternalERP = domain.includes('kreaddis.com');
+  const isMeeting = domain.includes('meet.google.com') || domain.includes('teams.microsoft.com');
+  if (isMeeting || (block.totalMinutes >= 5 && !isInternalERP)) {
+    for (const customer of customers) {
+      const custLower = customer.name.toLowerCase();
+      if (titleClean.includes(custLower)) {
+        const activity = activities.find(a => a.customerId === customer.id);
+        if (activity) {
+          return { activityId: activity.id, customerName: customer.name, confidence: 0.7 };
+        }
       }
     }
   }

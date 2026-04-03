@@ -95,10 +95,12 @@ export function createTrackingRouter(storage: Storage) {
     // Normalize title for comparison: strip spinner chars (⠀-⣿✳⠐⠂⠈⠠⠄⠁·*•)
     const normalizeTitle = (t: string) => t.replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁·*•]\s*/, '').trim();
 
-    // Deduplication: if last session has same app+normalized title+url, extend it
+    // Deduplication: extend if same app+title+url AND gap < 30s (prevents sleep merging)
     const last = data.screenSessions[data.screenSessions.length - 1];
+    const gap = last ? (new Date(session.from).getTime() - new Date(last.until).getTime()) / 1000 : Infinity;
     if (
       last &&
+      gap < 30 &&
       last.app === session.app &&
       normalizeTitle(last.title) === normalizeTitle(session.title) &&
       (last.url ?? '') === (session.url ?? '')
