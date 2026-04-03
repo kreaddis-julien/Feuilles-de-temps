@@ -67,6 +67,7 @@ function AppInner() {
   const navigate = useNavigate();
 
   const syncChannel = useRef(new BroadcastChannel('tempo-sync'));
+  useEffect(() => () => syncChannel.current.close(), []);
 
   const refreshDeferred = useCallback(async () => {
     try {

@@ -103,6 +103,7 @@ export default function TrayPopupPage() {
   }, []);
 
   const syncChannel = useRef(new BroadcastChannel('tempo-sync'));
+  useEffect(() => () => syncChannel.current.close(), []);
 
   const refresh = useCallback(async (notify = false) => {
     try {

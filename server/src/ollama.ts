@@ -113,7 +113,7 @@ IMPORTANT :
   // Parse JSON from response (LLM might wrap it in markdown)
   const jsonMatch = response.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    return { summary: '', descriptions: {}, suggestions: [] };
+    return { summary: '', suggestions: [] };
   }
 
   try {

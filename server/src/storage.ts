@@ -200,6 +200,33 @@ export class Storage {
     await this.atomicWrite(filePath, JSON.stringify(config, null, 2));
   }
 
+  async withTimesheet(date: string, fn: (data: TimesheetDay) => void | Promise<void>): Promise<TimesheetDay> {
+    const filePath = path.join(this.dataDir, `${date}.json`);
+    // Reuse the same lock mechanism as atomicWrite
+    const prev = this.writeLocks.get(filePath) ?? Promise.resolve();
+    const op = prev.then(async () => {
+      const data = await this.loadTimesheet(date);
+      await fn(data);
+      await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+      return data;
+    });
+    this.writeLocks.set(filePath, op.then(() => {}, () => {}));
+    return op;
+  }
+
+  async withTracking(date: string, fn: (data: TrackingDay) => void | Promise<void>): Promise<TrackingDay> {
+    const filePath = path.join(this.dataDir, `activity-${date}.json`);
+    const prev = this.writeLocks.get(filePath) ?? Promise.resolve();
+    const op = prev.then(async () => {
+      const data = await this.loadTracking(date);
+      await fn(data);
+      await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+      return data;
+    });
+    this.writeLocks.set(filePath, op.then(() => {}, () => {}));
+    return op;
+  }
+
   async cleanupOldTracking(retentionDays: number = 30): Promise<number> {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - retentionDays);
