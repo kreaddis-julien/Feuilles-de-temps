@@ -19,7 +19,7 @@ export async function checkOllama(): Promise<OllamaStatus> {
   }
 }
 
-export async function generateWithLLM(prompt: string, model = 'qwen3.5:27b', format?: 'json'): Promise<string> {
+export async function generateWithLLM(prompt: string, model = 'qwen3.5:9b', format?: 'json'): Promise<string> {
   const resp = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -57,7 +57,7 @@ export interface LLMSuggestedEntry {
   totalMinutes: number;
 }
 
-export async function analyzeReport(input: LLMReportInput, model = 'qwen3.5:27b'): Promise<{
+export async function analyzeReport(input: LLMReportInput, model = 'qwen3.5:9b'): Promise<{
   summary: string;
   suggestions: LLMSuggestedEntry[];
 }> {
