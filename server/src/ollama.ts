@@ -25,7 +25,7 @@ export async function generateWithLLM(prompt: string, model = 'qwen3.5:9b', form
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
-      prompt,
+      prompt: `/no_think\n${prompt}`,
       stream: false,
       ...(format ? { format } : {}),
       options: { temperature: 0.1 },
