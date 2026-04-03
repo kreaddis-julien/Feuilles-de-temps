@@ -133,6 +133,12 @@ export interface UnmatchedBlock {
   totalMinutes: number;
 }
 
+export interface StyleProfile {
+  descriptionsByActivity: Record<string, string[]>; // activityId → recent descriptions
+  corrections: { proposed: string; corrected: string; activityId: string }[];
+  updatedAt: string;
+}
+
 export interface TrackingConfig {
   screenEnabled: boolean;
   micEnabled: boolean;

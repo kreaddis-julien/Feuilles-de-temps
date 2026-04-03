@@ -280,7 +280,26 @@ export function createReportRouter(storage: Storage) {
           return { activityLabel: label, totalMinutes: entry.totalMinutes, context };
         });
 
-        const descriptions = await generateDescriptions({ entries: descEntries });
+        // Load style profile for description generation
+        const styleProfile = await storage.loadStyleProfile();
+        let styleText = '';
+        if (styleProfile.updatedAt) {
+          const exampleDescs = Object.entries(styleProfile.descriptionsByActivity)
+            .map(([actId, descs]) => {
+              const act = activitiesWithCustomer.find(a => a.id === actId);
+              const label = act ? `${act.customerName} - ${act.name}` : actId;
+              return `${label} : "${descs.slice(-3).join('", "')}"`;
+            })
+            .slice(0, 8);
+          const corrections = styleProfile.corrections.slice(-5)
+            .map(c => `"${c.proposed}" → "${c.corrected}"`);
+          styleText = [
+            exampleDescs.length ? `Exemples validés :\n${exampleDescs.join('\n')}` : '',
+            corrections.length ? `Corrections récentes :\n${corrections.join('\n')}` : '',
+          ].filter(Boolean).join('\n\n');
+        }
+
+        const descriptions = await generateDescriptions({ entries: descEntries, styleProfile: styleText || undefined });
         for (let i = 0; i < Math.min(suggestedEntries.length, descriptions.length); i++) {
           suggestedEntries[i].description = descriptions[i];
         }
@@ -446,6 +465,46 @@ export function createReportRouter(storage: Storage) {
     tracking.report.status = 'validated';
     (tracking.report as any).validatedEntryIds = createdIds;
     await storage.saveTracking(tracking);
+
+    // Update style profile with validated descriptions
+    try {
+      const profile = await storage.loadStyleProfile();
+      for (const entry of entries) {
+        if (!entry.activityId || !entry.description) continue;
+        if (!profile.descriptionsByActivity[entry.activityId]) {
+          profile.descriptionsByActivity[entry.activityId] = [];
+        }
+        const descs = profile.descriptionsByActivity[entry.activityId];
+        // Keep last 10 unique descriptions per activity
+        if (!descs.includes(entry.description)) {
+          descs.push(entry.description);
+          if (descs.length > 10) descs.shift();
+        }
+      }
+      // Detect corrections: compare validated descriptions with original suggestions
+      if (tracking.report.suggestedEntries) {
+        for (const entry of entries) {
+          const original = tracking.report.suggestedEntries.find(
+            (s: any) => s.activityId === entry.activityId
+          );
+          if (original && original.description && entry.description
+              && original.description !== entry.description
+              && entry.description.length > 5) {
+            profile.corrections.push({
+              proposed: original.description,
+              corrected: entry.description,
+              activityId: entry.activityId,
+            });
+            // Keep last 20 corrections
+            if (profile.corrections.length > 20) profile.corrections.shift();
+          }
+        }
+      }
+      profile.updatedAt = new Date().toISOString();
+      await storage.saveStyleProfile(profile);
+    } catch (err) {
+      console.error('[report] Style profile update failed:', err);
+    }
 
     res.json({ ok: true, entriesCreated: entries.length });
   });
