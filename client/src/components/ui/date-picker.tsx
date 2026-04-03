@@ -12,6 +12,7 @@ interface DatePickerProps {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  align?: 'start' | 'center' | 'end';
 }
 
 function toDate(dateStr: string): Date | undefined {
@@ -23,7 +24,7 @@ function fromDate(date: Date): string {
   return format(date, 'yyyy-MM-dd');
 }
 
-export function DatePicker({ value, onChange, placeholder = 'Choisir une date', className }: DatePickerProps) {
+export function DatePicker({ value, onChange, placeholder = 'Choisir une date', className, align = 'start' }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const selected = toDate(value);
 
@@ -42,7 +43,7 @@ export function DatePicker({ value, onChange, placeholder = 'Choisir une date', 
           {selected ? format(selected, 'dd MMM yyyy', { locale: fr }) : placeholder}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
+      <PopoverContent className="w-auto p-0" align={align}>
         <Calendar
           mode="single"
           selected={selected}
