@@ -176,7 +176,7 @@ export default function ReportPage() {
 
   const [regeneratingDescs, setRegeneratingDescs] = useState(false);
 
-  async function handleRegenerateDescriptions() {
+  async function handleRecalculate() {
     if (!selectedDate) return;
     setRegeneratingDescs(true);
     try {
@@ -186,23 +186,41 @@ export default function ReportPage() {
         ...editUnmatched.filter(e => e.selected && e.activityId).map(e => ({ activityId: e.activityId, totalMinutes: e.totalMinutes })),
       ];
       if (allEntries.length === 0) return;
-      const result = await api.regenerateDescriptions(selectedDate, allEntries);
-      if (result.descriptions.length > 0) {
-        // Apply descriptions to suggested entries first, then unmatched
-        let di = 0;
-        setEditEntries(prev => prev.map(e => {
-          if (e.selected && di < result.descriptions.length) {
-            return { ...e, description: result.descriptions[di++] };
-          }
-          return e;
-        }));
-        setEditUnmatched(prev => prev.map(e => {
-          if (e.selected && e.activityId && di < result.descriptions.length) {
-            return { ...e, description: result.descriptions[di++] };
-          }
-          return e;
-        }));
+
+      // Merge entries with same activityId
+      const merged = new Map<string, number>();
+      for (const e of allEntries) {
+        merged.set(e.activityId, (merged.get(e.activityId) || 0) + e.totalMinutes);
       }
+
+      const mergedEntries = [...merged.entries()].map(([activityId, totalMinutes]) => ({
+        activityId,
+        totalMinutes,
+      }));
+
+      // Regenerate descriptions for merged entries
+      const result = await api.regenerateDescriptions(selectedDate, mergedEntries);
+
+      // Build new suggested entries from merged results
+      const newEntries = mergedEntries.map((e, i) => {
+        const act = activities.find(a => a.id === e.activityId);
+        const customer = act ? customers.find(c => c.id === act.customerId) : null;
+        return {
+          activityId: e.activityId,
+          customerName: customer?.name,
+          description: result.descriptions[i] || '',
+          totalMinutes: e.totalMinutes,
+          roundedMinutes: Math.max(15, Math.ceil(e.totalMinutes / 15) * 15),
+          confidence: 'high' as const,
+          source: 'cmux' as const,
+          blockCount: 1,
+          selected: true,
+        };
+      }).sort((a, b) => b.totalMinutes - a.totalMinutes);
+
+      setEditEntries(newEntries);
+      // Remove assigned unmatched (they're now merged into suggested)
+      setEditUnmatched(prev => prev.filter(e => !e.selected || !e.activityId));
     } catch { /* ignore */ } finally {
       setRegeneratingDescs(false);
     }
@@ -530,7 +548,7 @@ export default function ReportPage() {
           {/* Action buttons */}
           {report.status !== 'validated' && (editEntries.some(e => e.selected) || editUnmatched.some(e => e.selected && e.activityId)) && (
             <div className="flex items-center justify-center gap-3 pt-2">
-              <Button variant="outline" onClick={handleRegenerateDescriptions} disabled={regeneratingDescs}>
+              <Button variant="outline" onClick={handleRecalculate} disabled={regeneratingDescs}>
                 {regeneratingDescs ? (
                   <>
                     <div className="h-3.5 w-3.5 rounded-full border-2 border-muted animate-spin border-t-foreground" />
@@ -539,7 +557,7 @@ export default function ReportPage() {
                 ) : (
                   <>
                     <Sparkles className="h-4 w-4" />
-                    Recalculer descriptions
+                    Recalculer
                   </>
                 )}
               </Button>
