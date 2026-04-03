@@ -26,8 +26,16 @@ export function createApp(dataDir: string, opts?: { staticDir?: string }) {
   const app = express();
   const storage = new Storage(dataDir);
 
-  app.use(cors());
+  app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:3001', 'tauri://localhost'] }));
   app.use(express.json());
+
+  // Validate date parameters to prevent path traversal
+  app.param('date', (req, res, next, value) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return res.status(400).json({ error: 'Invalid date format' });
+    }
+    next();
+  });
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });

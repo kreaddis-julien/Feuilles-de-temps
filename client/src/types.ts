@@ -21,7 +21,7 @@ export interface CustomersData {
 }
 
 export interface Segment {
-  start: string; // HH:mm
+  start: string; // ISO timestamp or HH:mm (legacy)
   end: string | null; // null = timer running
 }
 
@@ -126,10 +126,12 @@ export interface UnmatchedBlock {
   app: string;
   title: string;
   url?: string;
+  domain?: string;
   totalMinutes: number;
 }
 
 export interface TrackingConfig {
   screenEnabled: boolean;
   micEnabled: boolean;
+  projectMap?: Record<string, { activityId: string }>;
 }

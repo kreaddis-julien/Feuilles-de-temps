@@ -15,6 +15,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://0.0.0.0:${PORT}`);
 });
 
-// AJOUTEZ CECI :
-// Hack pour empêcher l'exécutable Bun de se fermer immédiatement
+// Keep the Bun runtime alive (Bun exits if no active handles remain)
 setInterval(() => {}, 1000 * 60 * 60);

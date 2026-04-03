@@ -114,6 +114,11 @@ export function createTrackingRouter(storage: Storage) {
     }
     const audioBuffer = Buffer.concat(chunks);
 
+    // Limit audio to 10MB
+    if (audioBuffer.length > 10 * 1024 * 1024) {
+      return res.status(413).json({ error: 'Audio too large' });
+    }
+
     if (audioBuffer.length < 1000) {
       return res.json({ ok: true, hasSpeech: false });
     }
