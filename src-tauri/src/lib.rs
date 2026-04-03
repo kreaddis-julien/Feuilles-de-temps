@@ -164,7 +164,7 @@ fn spawn_mic_tracker(_app_handle: tauri::AppHandle) {
     });
 }
 
-/// Spawn a thread that polls the frontmost app every 5 seconds and sends data to the server.
+/// Spawn a thread that polls the frontmost app every 10 seconds and sends data to the server.
 fn spawn_screen_tracker(_app_handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         let client = reqwest::blocking::Client::new();
@@ -173,9 +173,11 @@ fn spawn_screen_tracker(_app_handle: tauri::AppHandle) {
         let mut last_url = String::new();
         let mut was_idle = false;
         let mut idle_start: Option<String> = None;
+        let mut cached_project_mapping = String::new();
+        let mut project_cache_tick: u32 = 0;
 
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(5));
+            std::thread::sleep(std::time::Duration::from_secs(10));
 
             // Check if screen tracking is enabled
             let config_ok = client
@@ -299,14 +301,19 @@ return frontApp & "||" & frontAppId & "||" & winTitle
             // For terminal apps (cmux, Terminal, iTerm), enrich title with the active project directory
             let terminal_bundles = ["com.cmuxterm.app", "com.apple.Terminal", "com.googlecode.iterm2"];
             if terminal_bundles.contains(&bundle_id.as_str()) && url.is_empty() {
-                // Get tty-to-project mapping from foreground terminal processes
-                let mapping = std::process::Command::new("bash")
-                    .arg("-c")
-                    .arg("ps -eo pid,tty,stat 2>/dev/null | awk '$3 ~ /\\+/ && $2 != \"??\" {print $1, $2}' | while read pid tty; do cwd=$(lsof -p $pid 2>/dev/null | awk '/cwd/ {print $NF}'); if [ -n \"$cwd\" ] && [ \"$cwd\" != \"/\" ] && [ \"$cwd\" != \"$HOME\" ]; then echo \"$tty $(basename \"$cwd\")\"; fi; done | sort -u")
-                    .output()
-                    .ok()
-                    .and_then(|o| String::from_utf8(o.stdout).ok())
-                    .unwrap_or_default();
+                // Refresh tty-to-project mapping every 30s (3 ticks × 10s) to avoid expensive lsof calls
+                project_cache_tick += 1;
+                if project_cache_tick >= 3 || cached_project_mapping.is_empty() {
+                    project_cache_tick = 0;
+                    cached_project_mapping = std::process::Command::new("bash")
+                        .arg("-c")
+                        .arg("ps -eo pid,tty,stat 2>/dev/null | awk '$3 ~ /\\+/ && $2 != \"??\" {print $1, $2}' | while read pid tty; do cwd=$(lsof -p $pid 2>/dev/null | awk '/cwd/ {print $NF}'); if [ -n \"$cwd\" ] && [ \"$cwd\" != \"/\" ] && [ \"$cwd\" != \"$HOME\" ]; then echo \"$tty $(basename \"$cwd\")\"; fi; done | sort -u")
+                        .output()
+                        .ok()
+                        .and_then(|o| String::from_utf8(o.stdout).ok())
+                        .unwrap_or_default();
+                }
+                let mapping = &cached_project_mapping;
 
                 // Try to find the project that best matches the tab name
                 let clean_title = title.replace(|c: char| "⠀⣿✳⠐⠂⠈⠠⠄⠁".contains(c), "").trim().to_string();

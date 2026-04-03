@@ -212,12 +212,12 @@ export default function StatsPage() {
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* Period navigation */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="inline-flex rounded-md border border-border overflow-hidden">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="inline-flex rounded-md border border-border overflow-hidden shrink-0">
           {periodButtons.map(({ key, label }) => (
             <button
               key={key}
-              className={`px-4 py-1.5 text-sm border-none cursor-pointer transition-colors ${
+              className={`px-3 py-1.5 text-sm border-none cursor-pointer transition-colors ${
                 period === key
                   ? 'bg-primary text-primary-foreground font-medium'
                   : 'bg-card text-muted-foreground hover:bg-accent'
@@ -230,29 +230,24 @@ export default function StatsPage() {
         </div>
         {period === 'custom' ? (
           <div className="flex items-center gap-2">
-            <DatePicker value={customFrom} onChange={setCustomFrom} />
-            <span className="text-muted-foreground">—</span>
-            <DatePicker value={customTo} onChange={setCustomTo} align="end" />
+            <DatePicker value={customFrom} onChange={setCustomFrom} className="w-auto" />
+            <span className="text-muted-foreground shrink-0">—</span>
+            <DatePicker value={customTo} onChange={setCustomTo} className="w-auto" align="end" />
           </div>
         ) : (
-          <div className="flex items-center gap-4">
-            <Button variant="outline" size="icon" onClick={() => shiftPeriod(-1)}>
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => shiftPeriod(-1)}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="text-base font-semibold tabular-nums min-w-[12em] text-center">
+            <span className="text-sm font-semibold tabular-nums min-w-[10em] text-center">
               {periodLabel}
             </span>
-            <Button variant="outline" size="icon" onClick={() => shiftPeriod(1)}>
+            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => shiftPeriod(1)}>
               <ChevronRight className="h-4 w-4" />
             </Button>
-            {currentPeriodLabel && (
-              <Button
-                variant="outline"
-                size="sm"
-                className={isCurrentPeriod ? 'invisible' : ''}
-                onClick={() => setRefDate(todayStr())}
-              >
-                <CalendarDays className="h-3.5 w-3.5" />
+            {currentPeriodLabel && !isCurrentPeriod && (
+              <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setRefDate(todayStr())}>
+                <CalendarDays className="h-3 w-3" />
                 {currentPeriodLabel}
               </Button>
             )}
