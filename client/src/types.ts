@@ -95,6 +95,7 @@ export interface TrackingReport {
   unmatched: UnmatchedBlock[];
   totalTrackedMinutes: number;
   aiEnhanced?: boolean;
+  gaps?: { from: string; to: string; durationMinutes: number }[];
 }
 
 export interface ReportBlock {
@@ -107,7 +108,7 @@ export interface ReportBlock {
   totalSeconds: number;
   activityId?: string;
   customerName?: string;
-  confidence: number;
+  confidence: 'high' | 'medium' | 'low';
 }
 
 export interface SuggestedEntry {
@@ -116,7 +117,8 @@ export interface SuggestedEntry {
   description: string;
   totalMinutes: number;
   roundedMinutes: number;
-  confidence: number;
+  confidence: 'high' | 'medium' | 'low';
+  source: 'cmux' | 'claude' | 'domain' | 'calendar' | 'llm' | 'default';
   blockCount: number;
 }
 
