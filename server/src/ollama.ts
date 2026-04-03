@@ -1,4 +1,5 @@
 const OLLAMA_URL = 'http://localhost:11434';
+const DEFAULT_MODEL = 'qwen3.5:9b-q8_0';
 
 export interface OllamaStatus {
   available: boolean;
@@ -19,24 +20,23 @@ export async function checkOllama(): Promise<OllamaStatus> {
   }
 }
 
-// Chat-based LLM call (Qwen 3.5 requires /api/chat, not /api/generate)
-// think: false for fast plain-text responses (descriptions)
-export async function generateWithLLM(prompt: string, model = 'qwen3.5:9b-q8_0'): Promise<string> {
+// Low-level chat call — all LLM interactions go through here
+async function chat(system: string, user: string, options?: { temperature?: number; num_predict?: number }): Promise<string> {
   const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model,
+      model: DEFAULT_MODEL,
       messages: [
-        { role: 'system', content: 'Tu es un assistant concis qui répond directement sans explication superflue.' },
-        { role: 'user', content: prompt },
+        { role: 'system', content: system },
+        { role: 'user', content: user },
       ],
       think: false,
       stream: false,
       options: {
         num_ctx: 8192,
-        num_predict: 2048,
-        temperature: 0.6,
+        num_predict: options?.num_predict ?? 2048,
+        temperature: options?.temperature ?? 0.3,
         top_p: 0.95,
       },
     }),
@@ -50,15 +50,65 @@ export async function generateWithLLM(prompt: string, model = 'qwen3.5:9b-q8_0')
   return data.message.content;
 }
 
-export interface LLMReportInput {
-  date: string;
-  blocks: { app: string; title: string; domain?: string; totalMinutes: number; activityId?: string }[];
-  unmatched: { app: string; title: string; domain?: string; totalMinutes: number }[];
-  activities: { id: string; name: string; customerName: string }[];
-  claudePrompts?: { time: string; project: string; prompt: string }[];
-  projectMappings?: { project: string; activityId: string; label: string }[];
-  recentTimesheets?: { date: string; activityId: string; activityLabel: string; description: string; minutes: number }[];
+function parseJSON<T>(content: string, fallback: T): T {
+  try {
+    return JSON.parse(content);
+  } catch {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (match) {
+      try { return JSON.parse(match[0]); } catch { /* fall through */ }
+    }
+    console.log('[ollama] Failed to parse JSON:', content.slice(0, 200));
+    return fallback;
+  }
 }
+
+// ── Chain Step 1: Summarize dev work ──────────────────────────
+
+export interface DevContext {
+  projectSummaries: { project: string; activityLabel: string; summary: string }[];
+}
+
+export async function summarizeDevWork(input: {
+  claudePrompts: { time: string; project: string; prompt: string }[];
+  projectMappings: { project: string; activityId: string; label: string }[];
+}): Promise<DevContext> {
+  if (!input.claudePrompts.length) return { projectSummaries: [] };
+
+  // Group prompts by project, filter noise
+  const byProject: Record<string, string[]> = {};
+  for (const p of input.claudePrompts) {
+    if (!p.project || p.prompt.length < 15) continue;
+    if (/^(ok|oui|non|je|on |c'est|&)/i.test(p.prompt.trim())) continue;
+    if (!byProject[p.project]) byProject[p.project] = [];
+    byProject[p.project].push(`[${p.time}] ${p.prompt.slice(0, 100)}`);
+  }
+
+  const projectLines = Object.entries(byProject).map(([proj, prompts]) => {
+    const mapping = input.projectMappings.find(m => m.project === proj);
+    const label = mapping ? mapping.label : proj;
+    return `Projet "${proj}" (${label}) :\n${prompts.slice(0, 10).map(p => `  ${p}`).join('\n')}`;
+  }).join('\n\n');
+
+  if (!projectLines) return { projectSummaries: [] };
+
+  const result = await chat(
+    `Tu résumes le travail de développement d'un développeur Odoo à partir de ses prompts Claude Code.
+Pour chaque projet, écris 1-2 phrases décrivant ce qui a été fait concrètement (pas les prompts eux-mêmes).
+Réponds UNIQUEMENT en JSON. Format: {"projects":[{"project":"nom","summary":"résumé concret"}]}`,
+    projectLines,
+  );
+
+  const parsed = parseJSON<{ projects: { project: string; summary: string }[] }>(result, { projects: [] });
+  return {
+    projectSummaries: parsed.projects.map(p => {
+      const mapping = input.projectMappings.find(m => m.project === p.project);
+      return { project: p.project, activityLabel: mapping?.label ?? p.project, summary: p.summary };
+    }),
+  };
+}
+
+// ── Chain Step 2: Match unmatched blocks ──────────────────────
 
 export interface LLMSuggestedEntry {
   activityId: string;
@@ -66,11 +116,15 @@ export interface LLMSuggestedEntry {
   totalMinutes: number;
 }
 
-// JSON analysis call: think: true + format schema (required for reliable JSON with Qwen 3.5)
-export async function analyzeReport(input: LLMReportInput, model = 'qwen3.5:9b-q8_0'): Promise<{
-  summary: string;
-  suggestions: LLMSuggestedEntry[];
-}> {
+export async function matchUnmatchedBlocks(input: {
+  date: string;
+  unmatched: { app: string; title: string; domain?: string; totalMinutes: number }[];
+  activities: { id: string; name: string; customerName: string }[];
+  devContext: DevContext;
+  projectMappings: { project: string; activityId: string; label: string }[];
+}): Promise<{ summary: string; suggestions: LLMSuggestedEntry[] }> {
+  if (!input.unmatched.length) return { summary: '', suggestions: [] };
+
   const activitiesList = input.activities
     .map(a => `- ID: "${a.id}" → ${a.customerName} - ${a.name}`)
     .join('\n');
@@ -79,88 +133,71 @@ export async function analyzeReport(input: LLMReportInput, model = 'qwen3.5:9b-q
     .map(b => `- ${b.app} | ${b.title} ${b.domain ? `(${b.domain})` : ''} | ${b.totalMinutes}min`)
     .join('\n');
 
-
-  const mappingSection = input.projectMappings?.length
-    ? `\nMAPPING RÉPERTOIRES → ACTIVITÉS :\n${input.projectMappings.map(m => `- Répertoire "${m.project}" → activityId "${m.activityId}" (${m.label})`).join('\n')}\n`
+  const devSection = input.devContext.projectSummaries.length
+    ? `\nCONTEXTE DEV (résumé du travail de la journée) :\n${input.devContext.projectSummaries.map(p => `- ${p.activityLabel} : ${p.summary}`).join('\n')}\n`
     : '';
 
-  const claudeSection = input.claudePrompts?.length
-    ? `\nPROMPTS CLAUDE CODE :\n${input.claudePrompts.map(c => `- [${c.time}] projet: ${c.project} | "${c.prompt.slice(0, 150)}"`).join('\n')}\n`
+  const mappingSection = input.projectMappings.length
+    ? `\nMAPPING RÉPERTOIRES → ACTIVITÉS :\n${input.projectMappings.map(m => `- "${m.project}" → "${m.activityId}" (${m.label})`).join('\n')}\n`
     : '';
 
-  const historySection = input.recentTimesheets?.length
-    ? `\nTIMESHEETS RÉCENTS (style à imiter) :\n${input.recentTimesheets.map(t => `- [${t.date}] ${t.activityLabel} | "${t.description}" | ${t.minutes}min`).join('\n')}\n`
+  const result = await chat(
+    `Tu analyses des feuilles de temps pour une société de services informatiques.
+
+RÈGLES :
+- activityId DOIT être un ID de la liste. Si inconnu, mets "".
+- N'invente PAS de données. Utilise uniquement les blocs fournis.
+- Analyse chaque bloc individuellement, ne mets pas tout sur le même client.
+- "summary" résume la journée en 2-3 phrases.
+- "suggestions" contient les blocs que tu as pu identifier.
+
+Réponds UNIQUEMENT en JSON valide.
+Format: {"summary":"...","suggestions":[{"activityId":"...","description":"...","totalMinutes":0}]}`,
+    `ACTIVITÉS DISPONIBLES :\n${activitiesList}\n\nBLOCS NON IDENTIFIÉS DU ${input.date} :\n${unmatchedList}\n${devSection}${mappingSection}\nAnalyse et retourne le JSON.`,
+  );
+
+  const parsed = parseJSON<{ summary: string; suggestions: LLMSuggestedEntry[] }>(result, { summary: '', suggestions: [] });
+  return {
+    summary: parsed.summary || '',
+    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+  };
+}
+
+// ── Chain Step 3: Generate descriptions ──────────────────────
+
+export async function generateDescriptions(input: {
+  entries: { activityLabel: string; totalMinutes: number; context: string }[];
+  styleProfile?: string;
+}): Promise<string[]> {
+  if (!input.entries.length) return [];
+
+  const lines = input.entries.map((e, i) =>
+    `${i + 1}. ${e.activityLabel} (${e.totalMinutes}min) : ${e.context}`
+  );
+
+  const styleSection = input.styleProfile
+    ? `\nSTYLE DE L'UTILISATEUR :\n${input.styleProfile}\n`
     : '';
 
-  const systemPrompt = `Tu es un assistant d'analyse de feuilles de temps pour une société de services informatiques (développement Odoo, support, gestion de projet).
+  const result = await chat(
+    `Tu écris des descriptions courtes et professionnelles pour des feuilles de temps.
+Une description par ligne, pas de numérotation.
+NE COPIE PAS les titres de fenêtres ou noms de fichiers. Décris l'activité métier.${styleSection}`,
+    lines.join('\n'),
+    { temperature: 0.6 },
+  );
 
-Tu reçois des blocs d'activité écran non identifiés et tu dois les associer aux bonnes activités.
+  return result.trim().split('\n')
+    .map(l => l.replace(/^\d+[\.\)]\s*/, '').trim())
+    .filter(l => l.length > 3);
+}
 
-RÈGLES STRICTES :
-- activityId DOIT être un ID de la liste fournie. Si tu ne sais pas, mets "".
-- N'invente PAS de données ou de temps qui n'existent pas dans l'entrée.
-- NE COPIE PAS les titres de fenêtres dans les descriptions. Écris ce que la personne faisait.
-- Ne mets PAS tout dans le même client. Analyse chaque bloc individuellement.
-- Le champ "summary" résume la journée en 2-3 phrases en français.
-- Le champ "suggestions" contient uniquement les blocs que tu as pu identifier.
+// ── Legacy wrapper (used by report.ts description endpoint) ──
 
-Réponds UNIQUEMENT avec un JSON valide. Aucun texte, aucun markdown, juste le JSON.
-Format: {"summary":"...","suggestions":[{"activityId":"...","description":"...","totalMinutes":0}]}`;
-
-  const userPrompt = `ACTIVITÉS DISPONIBLES :
-${activitiesList}
-
-BLOCS NON IDENTIFIÉS DU ${input.date} :
-${unmatchedList}
-${mappingSection}${claudeSection}${historySection}
-Analyse ces blocs et retourne le JSON.`;
-
-  const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      think: false,
-      stream: false,
-      options: {
-        num_ctx: 8192,
-        num_predict: 2048,
-        temperature: 0.3,
-        top_p: 0.95,
-      },
-    }),
-  });
-
-  if (!resp.ok) {
-    throw new Error(`Ollama error: ${resp.status}`);
-  }
-
-  const data = await resp.json() as { message: { content: string } };
-  const content = data.message.content;
-
-  try {
-    const parsed = JSON.parse(content);
-    return {
-      summary: parsed.summary || '',
-      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
-    };
-  } catch {
-    // Fallback: try to extract JSON from response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-          summary: parsed.summary || '',
-          suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
-        };
-      } catch { /* fall through */ }
-    }
-    console.log('[ollama] Failed to parse JSON:', content.slice(0, 200));
-    return { summary: '', suggestions: [] };
-  }
+export async function generateWithLLM(prompt: string): Promise<string> {
+  return chat(
+    'Tu es un assistant concis qui répond directement sans explication superflue.',
+    prompt,
+    { temperature: 0.6 },
+  );
 }

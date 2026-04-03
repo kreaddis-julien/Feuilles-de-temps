@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import type { Storage } from '../storage.js';
 import type { ScreenSession, SuggestedEntry } from '../types.js';
-import { checkOllama, analyzeReport } from '../ollama.js';
+import { checkOllama, summarizeDevWork, matchUnmatchedBlocks, generateDescriptions } from '../ollama.js';
 
 export function createReportRouter(storage: Storage) {
   const router = Router();
@@ -189,140 +189,78 @@ export function createReportRouter(storage: Storage) {
     let summary = '';
     let aiEnhanced = false;
 
-    // Try LLM to enhance descriptions and match remaining unmatched blocks
+    // ── LLM Chain: 3 focused steps ──────────────────────────────
     const ollama = await checkOllama();
     const hasLLM = ollama.available && ollama.models.some(m => m.startsWith('qwen') || m.startsWith('llama') || m.startsWith('mistral'));
 
+    // Build project mappings for LLM context
+    const projectMappings: { project: string; activityId: string; label: string }[] = [];
+    for (const [project, mapping] of Object.entries(projectMap)) {
+      const act = activitiesWithCustomer.find(a => a.id === (mapping as any).activityId);
+      if (act) {
+        projectMappings.push({ project, activityId: act.id, label: `${act.customerName} - ${act.name}` });
+      }
+    }
+
     if (hasLLM) {
       try {
-        // Load recent timesheets as examples
-        const recentExamples: { date: string; activityId: string; activityLabel: string; description: string; minutes: number }[] = [];
-        const allDates = await storage.listDates();
-        for (const d of allDates.slice(-7)) {
-          if (d === req.params.date) continue;
-          const day = await storage.loadTimesheet(d);
-          for (const e of day.entries.filter(e => e.status === 'completed' && e.activityId)) {
-            const act = activitiesWithCustomer.find(a => a.id === e.activityId);
-            if (act) {
-              recentExamples.push({
-                date: d, activityId: e.activityId,
-                activityLabel: `${act.customerName} - ${act.name}`,
-                description: e.description, minutes: e.roundedMinutes,
-              });
-            }
-          }
-        }
-
-        // Build project mappings for LLM context
-        const projectMappings: { project: string; activityId: string; label: string }[] = [];
-        for (const [project, mapping] of Object.entries(projectMap)) {
-          const act = activitiesWithCustomer.find(a => a.id === (mapping as any).activityId);
-          if (act) {
-            projectMappings.push({ project, activityId: act.id, label: `${act.customerName} - ${act.name}` });
-          }
-        }
-
-        // Use short aliases for activityIds so the LLM copies them correctly
-        const aliasToId: Record<string, string> = {};
-        const idToAlias: Record<string, string> = {};
-        suggestedEntries.forEach((e, i) => {
-          const alias = `A${i + 1}`;
-          aliasToId[alias] = e.activityId;
-          idToAlias[e.activityId] = alias;
-        });
-
-        const llmResult = await analyzeReport({
-          date: req.params.date,
-          blocks: suggestedEntries.map((e, i) => {
-            const act = activitiesWithCustomer.find(a => a.id === e.activityId);
-            return { app: act ? `${act.customerName} - ${act.name}` : '', title: e.description, totalMinutes: e.totalMinutes, activityId: `A${i + 1}` };
-          }),
-          unmatched: unmatched.filter(b => b.totalMinutes >= 1).map(b => ({ app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes })),
-          claudePrompts: (tracking.claudePrompts || []).slice(-15).map((c: any) => ({
+        // Step 1: Summarize dev work from Claude prompts
+        const devContext = await summarizeDevWork({
+          claudePrompts: (tracking.claudePrompts || []).map((c: any) => ({
             time: c.timestamp?.slice(11, 16) || '',
             project: c.project || '',
             prompt: c.prompt || '',
           })),
-          activities: activitiesWithCustomer.map(a => ({
-            ...a,
-            id: idToAlias[a.id] || a.id,
+          projectMappings,
+        });
+
+        // Step 2: Match unmatched blocks using dev context
+        const llmResult = await matchUnmatchedBlocks({
+          date: req.params.date,
+          unmatched: unmatched.filter(b => b.totalMinutes >= 1).map(b => ({
+            app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes,
           })),
-          projectMappings: projectMappings.map(m => ({
-            ...m,
-            activityId: idToAlias[m.activityId] || m.activityId,
-          })),
-          recentTimesheets: recentExamples.slice(-20),
+          activities: activitiesWithCustomer,
+          devContext,
+          projectMappings,
         });
 
         summary = llmResult.summary;
         aiEnhanced = true;
 
-        // Merge LLM suggestions — remap aliases back to real IDs
+        // Merge LLM suggestions
         const validActivityIds = new Set(activities.activities.map(a => a.id));
         for (const s of llmResult.suggestions) {
-          const realId = aliasToId[s.activityId] || s.activityId;
-          if (realId && (validActivityIds.has(realId) || aliasToId[s.activityId])) {
-            s.activityId = realId;
-            const existing = suggestedEntries.find(e => e.activityId === s.activityId);
-            if (existing) {
-              // LLM might provide better description
-              if (s.description && s.description.length > 5) {
-                existing.description = s.description;
-              }
-            } else {
-              const act = activitiesWithCustomer.find(a => a.id === s.activityId);
-              suggestedEntries.push({
-                activityId: s.activityId,
-                customerName: act?.customerName,
-                description: s.description,
-                totalMinutes: s.totalMinutes,
-                roundedMinutes: Math.max(15, Math.ceil(s.totalMinutes / 15) * 15),
-                confidence: 'medium',
-                source: 'llm',
-                blockCount: 1,
-              });
+          if (!s.activityId || !validActivityIds.has(s.activityId)) continue;
+          const existing = suggestedEntries.find(e => e.activityId === s.activityId);
+          if (existing) {
+            if (s.description && s.description.length > 5) {
+              existing.description = s.description;
             }
-          }
-        }
-      } catch (err) {
-        console.error('[report] LLM analysis failed:', err);
-        // Fallback to basic matching
-      }
-    }
-
-    // Generate descriptions via a simple dedicated LLM call
-    if (aiEnhanced) {
-      try {
-        const { generateWithLLM } = await import('../ollama.js');
-
-        // Build context per activity
-        const claudePromptsByProject: Record<string, string[]> = {};
-        for (const p of (tracking.claudePrompts || []) as any[]) {
-          if (p.project && p.prompt && p.prompt.length > 10) {
-            if (!claudePromptsByProject[p.project]) claudePromptsByProject[p.project] = [];
-            claudePromptsByProject[p.project].push(p.prompt);
+          } else {
+            const act = activitiesWithCustomer.find(a => a.id === s.activityId);
+            suggestedEntries.push({
+              activityId: s.activityId,
+              customerName: act?.customerName,
+              description: s.description,
+              totalMinutes: s.totalMinutes,
+              roundedMinutes: Math.max(15, Math.ceil(s.totalMinutes / 15) * 15),
+              confidence: 'medium',
+              source: 'llm',
+              blockCount: 1,
+            });
           }
         }
 
-        const lines: string[] = [];
-        for (let i = 0; i < suggestedEntries.length; i++) {
-          const entry = suggestedEntries[i];
+        // Step 3: Generate descriptions using dev context
+        const descEntries = suggestedEntries.map(entry => {
           const act = activitiesWithCustomer.find(a => a.id === entry.activityId);
           const label = act ? `${act.customerName} - ${act.name}` : 'Inconnu';
-
-          // Find prompts for this activity
-          let prompts: string[] = [];
-          for (const [project, mapping] of Object.entries(projectMap)) {
-            if ((mapping as any).activityId === entry.activityId && claudePromptsByProject[project]) {
-              prompts = claudePromptsByProject[project]
-                .filter(p => p.length > 15 && !/^(ok|oui|non|je|on |c'est)/i.test(p.trim()))
-                .slice(0, 5)
-                .map(p => p.slice(0, 60));
-              break;
-            }
-          }
-
-          // Find screen titles for this activity
+          // Find dev context for this activity
+          const devSummary = devContext.projectSummaries.find(p => {
+            const mapping = projectMappings.find(m => m.project === p.project);
+            return mapping && mapping.activityId === entry.activityId;
+          });
           const screenTitles = blocks
             .filter(b => {
               const bracket = b.title.match(/\[([^\]]+)\]/);
@@ -335,24 +273,19 @@ export function createReportRouter(storage: Storage) {
             .slice(0, 3);
 
           const context = [
-            ...prompts.map(p => `prompt: "${p}"`),
+            devSummary ? `dev: ${devSummary.summary}` : '',
             ...screenTitles.map(t => `écran: "${t}"`),
-          ].join(', ') || `${entry.totalMinutes}min de travail`;
+          ].filter(Boolean).join(', ') || `${entry.totalMinutes}min de travail`;
 
-          lines.push(`${i + 1}. ${label} (${entry.totalMinutes}min) : ${context}`);
-        }
+          return { activityLabel: label, totalMinutes: entry.totalMinutes, context };
+        });
 
-        if (lines.length > 0) {
-          const descPrompt = `Pour chaque ligne, écris UNE description courte et professionnelle pour une feuille de temps. Pas de numérotation, juste la description sur chaque ligne.\n\n${lines.join('\n')}\n\nRéponds avec une description par ligne, rien d'autre :`;
-          const descResult = await generateWithLLM(descPrompt);
-          const descLines = descResult.trim().split('\n').map(l => l.replace(/^\d+[\.\)]\s*/, '').trim()).filter(l => l.length > 3);
-
-          for (let i = 0; i < Math.min(suggestedEntries.length, descLines.length); i++) {
-            suggestedEntries[i].description = descLines[i];
-          }
+        const descriptions = await generateDescriptions({ entries: descEntries });
+        for (let i = 0; i < Math.min(suggestedEntries.length, descriptions.length); i++) {
+          suggestedEntries[i].description = descriptions[i];
         }
       } catch (err) {
-        console.error('[report] Description generation failed:', err);
+        console.error('[report] LLM chain failed:', err);
       }
     }
 
