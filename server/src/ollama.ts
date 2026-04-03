@@ -19,16 +19,26 @@ export async function checkOllama(): Promise<OllamaStatus> {
   }
 }
 
-export async function generateWithLLM(prompt: string, model = 'qwen3.5:9b', format?: 'json'): Promise<string> {
-  const resp = await fetch(`${OLLAMA_URL}/api/generate`, {
+// Chat-based LLM call (Qwen 3.5 requires /api/chat, not /api/generate)
+// think: false for fast plain-text responses (descriptions)
+export async function generateWithLLM(prompt: string, model = 'qwen3.5:9b'): Promise<string> {
+  const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
-      prompt: `/no_think\n${prompt}`,
+      messages: [
+        { role: 'system', content: 'Tu es un assistant concis qui répond directement sans explication superflue.' },
+        { role: 'user', content: prompt },
+      ],
+      think: false,
       stream: false,
-      ...(format ? { format } : {}),
-      options: { temperature: 0.1 },
+      options: {
+        num_ctx: 8192,
+        num_predict: 2048,
+        temperature: 0.6,
+        top_p: 0.95,
+      },
     }),
   });
 
@@ -36,8 +46,8 @@ export async function generateWithLLM(prompt: string, model = 'qwen3.5:9b', form
     throw new Error(`Ollama error: ${resp.status}`);
   }
 
-  const data = await resp.json() as { response: string };
-  return data.response;
+  const data = await resp.json() as { message: { content: string } };
+  return data.message.content;
 }
 
 export interface LLMReportInput {
@@ -57,17 +67,13 @@ export interface LLMSuggestedEntry {
   totalMinutes: number;
 }
 
+// JSON analysis call: think: true + format schema (required for reliable JSON with Qwen 3.5)
 export async function analyzeReport(input: LLMReportInput, model = 'qwen3.5:9b'): Promise<{
   summary: string;
   suggestions: LLMSuggestedEntry[];
 }> {
   const activitiesList = input.activities
     .map(a => `- ID: "${a.id}" → ${a.customerName} - ${a.name}`)
-    .join('\n');
-
-  const blocksList = input.blocks
-    .filter(b => b.totalMinutes >= 1)
-    .map(b => `- [activityId: "${b.activityId || ''}"] ${b.app} | titres fenêtres: ${b.title} | ${b.totalMinutes}min`)
     .join('\n');
 
   const unmatchedList = input.unmatched
@@ -79,58 +85,86 @@ export async function analyzeReport(input: LLMReportInput, model = 'qwen3.5:9b')
     : '';
 
   const mappingSection = input.projectMappings?.length
-    ? `\nMAPPING RÉPERTOIRES → ACTIVITÉS (FAIT CONFIANCE À CES CORRESPONDANCES) :\n${input.projectMappings.map(m => `- Répertoire "${m.project}" → activityId "${m.activityId}" (${m.label})`).join('\n')}\n`
+    ? `\nMAPPING RÉPERTOIRES → ACTIVITÉS :\n${input.projectMappings.map(m => `- Répertoire "${m.project}" → activityId "${m.activityId}" (${m.label})`).join('\n')}\n`
     : '';
 
   const claudeSection = input.claudePrompts?.length
-    ? `\nPROMPTS CLAUDE CODE (commandes de développement, donnent le contexte exact du travail) :\n${input.claudePrompts.map(c => `- [${c.time}] projet: ${c.project} | "${c.prompt.slice(0, 150)}"`).join('\n')}\n`
+    ? `\nPROMPTS CLAUDE CODE :\n${input.claudePrompts.map(c => `- [${c.time}] projet: ${c.project} | "${c.prompt.slice(0, 150)}"`).join('\n')}\n`
     : '';
 
   const historySection = input.recentTimesheets?.length
-    ? `\nEXEMPLES DE TIMESHEETS RÉCENTS (pour apprendre le style de l'utilisateur) :\n${input.recentTimesheets.map(t => `- [${t.date}] ${t.activityLabel} | "${t.description}" | ${t.minutes}min`).join('\n')}\n`
+    ? `\nTIMESHEETS RÉCENTS (style à imiter) :\n${input.recentTimesheets.map(t => `- [${t.date}] ${t.activityLabel} | "${t.description}" | ${t.minutes}min`).join('\n')}\n`
     : '';
 
-  const prompt = `Tu es un assistant qui analyse l'activité écran d'un employé d'une société de services informatiques (développement Odoo, support, gestion de projet) pour remplir ses feuilles de temps.
+  const systemPrompt = `Tu es un assistant d'analyse de feuilles de temps pour une société de services informatiques (développement Odoo, support, gestion de projet).
 
-ACTIVITÉS DISPONIBLES (utilise UNIQUEMENT ces IDs) :
+Tu reçois des blocs d'activité écran non identifiés et tu dois les associer aux bonnes activités.
+
+RÈGLES STRICTES :
+- activityId DOIT être un ID de la liste fournie. Si tu ne sais pas, mets "".
+- N'invente PAS de données ou de temps qui n'existent pas dans l'entrée.
+- NE COPIE PAS les titres de fenêtres dans les descriptions. Écris ce que la personne faisait.
+- Ne mets PAS tout dans le même client. Analyse chaque bloc individuellement.
+- Le champ "summary" résume la journée en 2-3 phrases en français.
+- Le champ "suggestions" contient uniquement les blocs que tu as pu identifier.
+
+Réponds UNIQUEMENT avec un JSON valide. Aucun texte, aucun markdown, juste le JSON.
+Format: {"summary":"...","suggestions":[{"activityId":"...","description":"...","totalMinutes":0}]}`;
+
+  const userPrompt = `ACTIVITÉS DISPONIBLES :
 ${activitiesList}
 
-ACTIVITÉ ÉCRAN DU ${input.date} :
+BLOCS NON IDENTIFIÉS DU ${input.date} :
 ${unmatchedList}
 ${mappingSection}${audioSection}${claudeSection}${historySection}
-RÈGLES DE CORRESPONDANCE :
-- Si un nom entre crochets [xxx] est présent, c'est le répertoire du projet actif. Utilise le MAPPING RÉPERTOIRES ci-dessus pour trouver l'activityId correspondant.
-- Les URLs contenant un nom de client identifient le client (ex: gemaddis.odoo.com = GemAddis).
-- "Claude Code", "cmux" SANS crochets = regarder les PROMPTS CLAUDE CODE pour deviner le projet.
-- "timesheet" = travail interne sur l'outil de suivi du temps.
-- NE COPIE PAS les titres de fenêtres dans les descriptions. Écris ce que la personne faisait (ex: "Développement site web", "Support client", "Migration DHL").
-- IMPORTANT : ne mets PAS tout dans le même client. Regarde attentivement les crochets de CHAQUE bloc et utilise le mapping.
+Analyse ces blocs et retourne le JSON.`;
 
-Retourne UNIQUEMENT un JSON :
-{"summary":"résumé français 2-3 phrases","suggestions":[{"activityId":"ID","description":"description métier courte","totalMinutes":nombre}]}
+  const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      think: false,
+      stream: false,
+      options: {
+        num_ctx: 8192,
+        num_predict: 2048,
+        temperature: 0.3,
+        top_p: 0.95,
+      },
+    }),
+  });
 
-RÈGLES :
-- "summary" : résume la journée en mentionnant les clients/projets.
-- "suggestions" : pour les BLOCS NON IDENTIFIÉS UNIQUEMENT, essaie de deviner l'activité avec le mapping.
-- activityId DOIT être un ID de la liste ci-dessus. Si tu ne sais pas, mets "".
-- N'invente PAS de données.`;
-
-  const response = await generateWithLLM(prompt, model, 'json');
-
-  // Parse JSON from response (LLM might wrap it in markdown)
-  const jsonMatch = response.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    console.log('[ollama] No JSON found in response');
-    return { summary: '', suggestions: [] };
+  if (!resp.ok) {
+    throw new Error(`Ollama error: ${resp.status}`);
   }
 
+  const data = await resp.json() as { message: { content: string } };
+  const content = data.message.content;
+
   try {
-    const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = JSON.parse(content);
     return {
       summary: parsed.summary || '',
       suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
     };
   } catch {
+    // Fallback: try to extract JSON from response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          summary: parsed.summary || '',
+          suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+        };
+      } catch { /* fall through */ }
+    }
+    console.log('[ollama] Failed to parse JSON:', content.slice(0, 200));
     return { summary: '', suggestions: [] };
   }
 }
