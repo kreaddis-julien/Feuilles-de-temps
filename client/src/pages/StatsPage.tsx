@@ -232,7 +232,7 @@ export default function StatsPage() {
           <div className="flex items-center gap-2">
             <DatePicker value={customFrom} onChange={setCustomFrom} />
             <span className="text-muted-foreground">—</span>
-            <DatePicker value={customTo} onChange={setCustomTo} />
+            <DatePicker value={customTo} onChange={setCustomTo} align="end" />
           </div>
         ) : (
           <div className="flex items-center gap-4">
