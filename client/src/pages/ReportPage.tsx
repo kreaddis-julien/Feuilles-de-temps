@@ -3,7 +3,7 @@ import type { TrackingReport, SuggestedEntry, AudioSegment } from '../types';
 import * as api from '../api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ChevronLeft, FileText, Check, Clock, AlertCircle, Mic, ChevronDown } from 'lucide-react';
+import { ChevronLeft, FileText, Check, Clock, AlertCircle, Mic, ChevronDown, Terminal } from 'lucide-react';
 
 function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -32,6 +32,8 @@ export default function ReportPage() {
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
   const [audioSegments, setAudioSegments] = useState<AudioSegment[]>([]);
   const [showAudio, setShowAudio] = useState(false);
+  const [claudePrompts, setClaudePrompts] = useState<{ timestamp: string; project: string; prompt: string }[]>([]);
+  const [showClaude, setShowClaude] = useState(false);
   // Editable unmatched blocks
   const [editUnmatched, setEditUnmatched] = useState<{ app: string; title: string; totalMinutes: number; activityId: string; description: string; selected: boolean }[]>([]);
 
@@ -71,6 +73,7 @@ export default function ReportPage() {
       // Load audio segments
       const tracking = await api.getTracking(date);
       setAudioSegments(tracking.audioSegments.filter(s => s.hasSpeech));
+      setClaudePrompts((tracking as any).claudePrompts || []);
     } catch {
       setReport(null);
     } finally {
@@ -85,6 +88,7 @@ export default function ReportPage() {
       try {
         const tracking = await api.getTracking(selectedDate);
         setAudioSegments(tracking.audioSegments.filter(s => s.hasSpeech));
+        setClaudePrompts((tracking as any).claudePrompts || []);
       } catch { /* ignore */ }
     };
     const id = setInterval(refreshTracking, 5000);
@@ -388,6 +392,31 @@ export default function ReportPage() {
                     <div key={i} className="flex gap-3 text-sm px-3 py-2 rounded-lg bg-muted/50">
                       <span className="text-muted-foreground shrink-0 tabular-nums">{new Date(seg.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
                       <span>{seg.transcript}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Claude Code prompts */}
+          {claudePrompts.length > 0 && (
+            <section className="space-y-3">
+              <button
+                onClick={() => setShowClaude(v => !v)}
+                className="flex items-center gap-2 text-lg font-semibold hover:text-primary transition-colors"
+              >
+                <Terminal className="h-4 w-4" />
+                Prompts Claude Code ({claudePrompts.length})
+                <ChevronDown className={`h-4 w-4 transition-transform ${showClaude ? 'rotate-180' : ''}`} />
+              </button>
+              {showClaude && (
+                <div className="space-y-1">
+                  {claudePrompts.map((p, i) => (
+                    <div key={i} className="flex gap-3 text-sm px-3 py-2 rounded-lg bg-muted/50">
+                      <span className="text-muted-foreground shrink-0 tabular-nums">{new Date(p.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="text-xs text-primary font-medium shrink-0">{p.project}</span>
+                      <span className="truncate">{p.prompt}</span>
                     </div>
                   ))}
                 </div>
