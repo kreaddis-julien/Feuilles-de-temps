@@ -224,6 +224,7 @@ export function createReportRouter(storage: Storage) {
       try {
         const audioTranscripts = (tracking.audioSegments || [])
           .filter((s: any) => s.hasSpeech && s.transcript)
+          .slice(-10)
           .map((s: any) => ({ time: s.timestamp.slice(11, 16), text: s.transcript }));
 
         // Load recent timesheets as examples
@@ -270,7 +271,7 @@ export function createReportRouter(storage: Storage) {
           }),
           unmatched: unmatched.filter(b => b.totalMinutes >= 1).map(b => ({ app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes })),
           audioTranscripts,
-          claudePrompts: (tracking.claudePrompts || []).map((c: any) => ({
+          claudePrompts: (tracking.claudePrompts || []).slice(-15).map((c: any) => ({
             time: c.timestamp?.slice(11, 16) || '',
             project: c.project || '',
             prompt: c.prompt || '',
