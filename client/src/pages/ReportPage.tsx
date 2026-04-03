@@ -25,6 +25,7 @@ export default function ReportPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [report, setReport] = useState<TrackingReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<{ step: number; total: number; label: string } | null>(null);
   const [validating, setValidating] = useState(false);
   // Editable suggested entries
   const [editEntries, setEditEntries] = useState<(SuggestedEntry & { selected: boolean })[]>([]);
@@ -51,25 +52,31 @@ export default function ReportPage() {
     api.getCustomers().then(c => setCustomers(c.customers));
   }, []);
 
+  function applyReport(r: TrackingReport) {
+    setReport(r);
+    setEditEntries(r.suggestedEntries.map(e => ({ ...e, selected: true })));
+    setEditUnmatched(r.unmatched.map(b => ({
+      app: b.app,
+      title: b.title,
+      totalMinutes: b.totalMinutes,
+      activityId: '',
+      description: `${b.app}: ${b.title}`,
+      selected: false,
+    })));
+  }
+
   async function selectDate(date: string) {
     setSelectedDate(date);
     setLoading(true);
+    setProgress(null);
     try {
       let r = await api.getReport(date);
       if (!r) {
-        r = await api.generateReport(date);
+        r = await api.generateReportSSE(date, (step, total, label) => {
+          setProgress({ step, total, label });
+        });
       }
-      setReport(r);
-      setEditEntries(r.suggestedEntries.map(e => ({ ...e, selected: true })));
-      setEditUnmatched(r.unmatched.map(b => ({
-        app: b.app,
-        title: b.title,
-        totalMinutes: b.totalMinutes,
-        activityId: '',
-        description: `${b.app}: ${b.title}`,
-        selected: false,
-      })));
-      // Load audio segments
+      applyReport(r);
       const tracking = await api.getTracking(date);
       setClaudePrompts((tracking as any).claudePrompts || []);
       setScreenSessions(tracking.screenSessions || []);
@@ -77,6 +84,7 @@ export default function ReportPage() {
       setReport(null);
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   }
 
@@ -97,22 +105,17 @@ export default function ReportPage() {
   async function regenerateReport() {
     if (!selectedDate) return;
     setLoading(true);
+    setProgress(null);
     try {
-      const r = await api.generateReport(selectedDate);
-      setReport(r);
-      setEditEntries(r.suggestedEntries.map(e => ({ ...e, selected: true })));
-      setEditUnmatched(r.unmatched.map(b => ({
-        app: b.app,
-        title: b.title,
-        totalMinutes: b.totalMinutes,
-        activityId: '',
-        description: `${b.app}: ${b.title}`,
-        selected: false,
-      })));
+      const r = await api.generateReportSSE(selectedDate, (step, total, label) => {
+        setProgress({ step, total, label });
+      });
+      applyReport(r);
     } catch {
       setReport(null);
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   }
 
@@ -286,15 +289,53 @@ export default function ReportPage() {
         </Button>
       </div>
 
-      {loading && !report ? (
-        <div className="flex flex-col items-center gap-4 py-16">
-          <div className="relative">
-            <div className="h-10 w-10 rounded-full border-4 border-muted animate-spin border-t-primary" />
-          </div>
-          <div className="text-center space-y-1">
-            <p className="text-sm font-medium">Génération du rapport en cours...</p>
-            <p className="text-xs text-muted-foreground">Analyse des données avec l'IA, cela peut prendre 20-30 secondes</p>
-          </div>
+      {loading ? (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Progress indicator */}
+          {progress && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">{progress.label}</span>
+                <span className="font-mono text-xs text-muted-foreground">{progress.step}/{progress.total}</span>
+              </div>
+              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-500 ease-out"
+                  style={{ width: `${(progress.step / progress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {!progress && (
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <div className="h-4 w-4 rounded-full border-2 border-muted animate-spin border-t-primary" />
+              Chargement...
+            </div>
+          )}
+
+          {/* Skeleton cards */}
+          <Card className="py-4 gap-0">
+            <CardContent className="space-y-2">
+              <div className="h-4 w-48 bg-muted rounded animate-pulse" />
+              <div className="h-3 w-full bg-muted rounded animate-pulse" />
+            </CardContent>
+          </Card>
+          {[1, 2, 3].map(i => (
+            <Card key={i} className="py-3 gap-0">
+              <CardContent className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2.5 w-2.5 rounded-full bg-muted animate-pulse" />
+                    <div className="h-4 w-32 bg-muted rounded animate-pulse" />
+                  </div>
+                  <div className="h-4 w-12 bg-muted rounded animate-pulse" />
+                </div>
+                <div className="pl-6">
+                  <div className="h-8 w-full bg-muted rounded animate-pulse" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       ) : !report ? (
         <p className="text-center text-muted-foreground py-12">Aucune donnee disponible.</p>

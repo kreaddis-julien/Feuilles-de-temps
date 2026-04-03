@@ -127,6 +127,42 @@ export const getReport = (date: string) =>
 export const generateReport = (date: string) =>
   json<TrackingReport>(`/report/${date}/generate`, { method: 'POST' });
 
+export function generateReportSSE(
+  date: string,
+  onProgress: (step: number, total: number, label: string) => void,
+): Promise<TrackingReport> {
+  return new Promise((resolve, reject) => {
+    fetch(`${BASE}/report/${date}/generate`, {
+      method: 'POST',
+      headers: { 'Accept': 'text/event-stream', 'Content-Type': 'application/json' },
+    }).then(async (resp) => {
+      if (!resp.ok) return reject(new Error(`API error: ${resp.status}`));
+      const reader = resp.body?.getReader();
+      if (!reader) return reject(new Error('No response body'));
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.done && data.report) {
+              resolve(data.report);
+            } else if (data.step !== undefined) {
+              onProgress(data.step, data.total, data.label);
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+    }).catch(reject);
+  });
+}
+
 export const validateReport = (date: string, entries: { activityId: string; description: string; roundedMinutes: number }[]) =>
   json<{ ok: boolean; entriesCreated: number }>(`/report/${date}/validate`, {
     method: 'POST',

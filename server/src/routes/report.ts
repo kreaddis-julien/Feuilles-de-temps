@@ -16,14 +16,32 @@ export function createReportRouter(storage: Storage) {
     return res.json(null);
   });
 
-  // Generate (or regenerate) report for a date (basic aggregation, no AI)
+  // Generate (or regenerate) report for a date — streams progress via SSE
   router.post('/:date/generate', async (req, res) => {
+    const useSSE = req.headers.accept === 'text/event-stream';
+
     const tracking = await storage.loadTracking(req.params.date);
     const activities = await storage.loadActivities();
     const customers = await storage.loadCustomers();
 
     if (tracking.screenSessions.length === 0) {
       return res.status(404).json({ error: 'No tracking data for this date' });
+    }
+
+    // SSE helper
+    function sendProgress(step: number, total: number, label: string) {
+      if (useSSE) {
+        res.write(`data: ${JSON.stringify({ step, total, label })}\n\n`);
+      }
+    }
+
+    if (useSSE) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      });
+      sendProgress(0, 5, 'Agrégation des sessions...');
     }
 
     // Aggregate sessions by app+title into time blocks
@@ -189,6 +207,8 @@ export function createReportRouter(storage: Storage) {
     let summary = '';
     let aiEnhanced = false;
 
+    sendProgress(1, 5, 'Matching des sessions...');
+
     // ── LLM Chain: 3 focused steps ──────────────────────────────
     const ollama = await checkOllama();
     const hasLLM = ollama.available && ollama.models.some(m => m.startsWith('qwen') || m.startsWith('llama') || m.startsWith('mistral'));
@@ -205,6 +225,7 @@ export function createReportRouter(storage: Storage) {
     if (hasLLM) {
       try {
         // Step 1: Summarize dev work from Claude prompts
+        sendProgress(2, 5, 'Résumé du travail dev...');
         const devContext = await summarizeDevWork({
           claudePrompts: (tracking.claudePrompts || []).map((c: any) => ({
             time: c.timestamp?.slice(11, 16) || '',
@@ -217,6 +238,7 @@ export function createReportRouter(storage: Storage) {
         });
 
         // Step 2: Match unmatched blocks using dev context
+        sendProgress(3, 5, 'Identification des blocs...');
         const llmResult = await matchUnmatchedBlocks({
           date: req.params.date,
           unmatched: unmatched.filter(b => b.totalMinutes >= 1).map(b => ({
@@ -255,6 +277,7 @@ export function createReportRouter(storage: Storage) {
         }
 
         // Step 3: Generate descriptions using dev context
+        sendProgress(4, 5, 'Génération des descriptions...');
         const descEntries = suggestedEntries.map(entry => {
           const act = activitiesWithCustomer.find(a => a.id === entry.activityId);
           const label = act ? `${act.customerName} - ${act.name}` : 'Inconnu';
@@ -338,7 +361,14 @@ export function createReportRouter(storage: Storage) {
 
     tracking.report = report;
     await storage.saveTracking(tracking);
-    res.json(report);
+
+    if (useSSE) {
+      sendProgress(5, 5, 'Terminé');
+      res.write(`data: ${JSON.stringify({ done: true, report })}\n\n`);
+      res.end();
+    } else {
+      res.json(report);
+    }
   });
 
   // Regenerate descriptions for given entries (after manual assignment)
