@@ -27,6 +27,11 @@ export default function SettingsPage() {
   const [editActName, setEditActName] = useState('');
   const [editActCustomerId, setEditActCustomerId] = useState('');
 
+  // Derive activity name categories from existing activities + defaults
+  const defaultCategories = ['Odoo', 'Web', 'Dev', 'Interne', 'Support', 'Gestion de projet'];
+  const existingNames = [...new Set(activities.activities.map(a => a.name))];
+  const activityCategories = [...new Set([...defaultCategories, ...existingNames])].sort((a, b) => a.localeCompare(b, 'fr'));
+
   // Tracking
   const [trackingConfig, setTrackingConfig] = useState<TrackingConfig>({ screenEnabled: true, micEnabled: false });
   const [ollamaStatus, setOllamaStatus] = useState<{ available: boolean; models: string[] }>({ available: false, models: [] });
@@ -233,19 +238,31 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-semibold">Activités</h1>
 
         <form onSubmit={handleCreateActivity} className="flex gap-2 items-center flex-wrap">
-          <Input
-            placeholder="Nom de l'activité"
+          <select
+            className={selectClass}
             value={newActName}
-            onChange={(e) => setNewActName(e.target.value)}
-            className="flex-1 max-w-80"
-          />
+            onChange={(e) => {
+              if (e.target.value === '__custom__') {
+                const custom = prompt('Nom de la catégorie :');
+                if (custom?.trim()) setNewActName(custom.trim());
+              } else {
+                setNewActName(e.target.value);
+              }
+            }}
+          >
+            <option value="">-- Activité --</option>
+            {activityCategories.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+            <option value="__custom__">+ Autre...</option>
+          </select>
           <select
             className={selectClass}
             value={newActCustomerId}
             onChange={(e) => setNewActCustomerId(e.target.value)}
           >
             <option value="">-- Client --</option>
-            {customers.customers.map((c) => (
+            {[...customers.customers].sort((a, b) => a.name.localeCompare(b.name, 'fr')).map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
@@ -323,11 +340,25 @@ export default function SettingsPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-muted-foreground">Nom</label>
-              <Input
+              <label className="text-sm font-medium text-muted-foreground">Activité</label>
+              <select
+                className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
                 value={editActName}
-                onChange={(e) => setEditActName(e.target.value)}
-              />
+                onChange={(e) => {
+                  if (e.target.value === '__custom__') {
+                    const custom = prompt('Nom de la catégorie :');
+                    if (custom?.trim()) setEditActName(custom.trim());
+                  } else {
+                    setEditActName(e.target.value);
+                  }
+                }}
+              >
+                <option value="">-- Activité --</option>
+                {activityCategories.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+                <option value="__custom__">+ Autre...</option>
+              </select>
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-muted-foreground">Client</label>
@@ -337,7 +368,7 @@ export default function SettingsPage() {
                 onChange={(e) => setEditActCustomerId(e.target.value)}
               >
                 <option value="">-- Aucun --</option>
-                {customers.customers.map((c) => (
+                {[...customers.customers].sort((a, b) => a.name.localeCompare(b.name, 'fr')).map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
