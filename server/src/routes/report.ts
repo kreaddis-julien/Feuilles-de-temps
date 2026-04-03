@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import type { Storage } from '../storage.js';
-import type { ScreenSession } from '../types.js';
+import type { ScreenSession, SuggestedEntry } from '../types.js';
 import { checkOllama, analyzeReport } from '../ollama.js';
 
 export function createReportRouter(storage: Storage) {
@@ -28,33 +28,6 @@ export function createReportRouter(storage: Storage) {
 
     // Aggregate sessions by app+title into time blocks
     const blocks = aggregateSessions(tracking.screenSessions);
-
-    // Enrich with Claude Code prompt time — estimate 3 min per prompt as active work
-    const claudeTimeByProject: Record<string, number> = {};
-    for (const p of (tracking.claudePrompts || []) as any[]) {
-      if (p.project) {
-        claudeTimeByProject[p.project] = (claudeTimeByProject[p.project] || 0) + 3;
-      }
-    }
-    // Add Claude time as virtual blocks if the project has a mapping
-    const config2 = await storage.loadTrackingConfig() as any;
-    const projMap = config2.projectMap || {};
-    for (const [project, minutes] of Object.entries(claudeTimeByProject)) {
-      if (projMap[project]) {
-        // Check if this project already has screen time
-        const hasScreenTime = blocks.some(b => {
-          const bracket = b.title.match(/\[([^\]]+)\]/);
-          return bracket && bracket[1].trim() === project;
-        });
-        if (!hasScreenTime) {
-          // Add virtual block for Claude Code time on this project
-          blocks.push({
-            from: '', to: '', app: 'Claude Code', title: `[${project}]`,
-            totalSeconds: minutes * 60, totalMinutes: minutes,
-          });
-        }
-      }
-    }
 
     // Add audio conversation time as virtual blocks
     // Each audio segment represents 30s of active conversation
@@ -87,70 +60,160 @@ export function createReportRouter(storage: Storage) {
 
     const totalTrackedMinutes = blocks.reduce((s, b) => s + b.totalMinutes, 0);
 
+    // Detect gaps (sleep/lock periods)
+    const gaps: { from: string; to: string; durationMinutes: number }[] = [];
+    const sortedSessions = [...tracking.screenSessions].sort((a, b) => a.from.localeCompare(b.from));
+    for (let i = 1; i < sortedSessions.length; i++) {
+      const prevEnd = new Date(sortedSessions[i-1].until).getTime();
+      const nextStart = new Date(sortedSessions[i].from).getTime();
+      const gapMs = nextStart - prevEnd;
+      if (gapMs > 5 * 60 * 1000) { // > 5 minutes
+        gaps.push({
+          from: sortedSessions[i-1].until,
+          to: sortedSessions[i].from,
+          durationMinutes: Math.round(gapMs / 60000),
+        });
+      }
+    }
+
+    // ── COUCHE 1: Sources directes ──────────────────────────────
+
+    const config = await storage.loadTrackingConfig() as any;
+    const projectMap: Record<string, { activityId: string }> = config.projectMap || {};
+
     const activitiesWithCustomer = activities.activities.map(a => {
       const c = customers.customers.find(c => c.id === a.customerId);
       return { id: a.id, name: a.name, customerName: c?.name ?? '' };
     });
 
-    // Pre-match blocks using project mapping (crochets → activityId)
-    const config = await storage.loadTrackingConfig() as any;
-    const projectMap: Record<string, { activityId: string }> = config.projectMap || {};
+    // Accumulate time per activityId with confidence tracking
+    const matched = new Map<string, {
+      totalSecs: number;
+      confidence: 'high' | 'medium' | 'low';
+      source: 'cmux' | 'claude' | 'domain' | 'calendar' | 'llm' | 'default';
+      titles: Set<string>;
+      customerName?: string;
+    }>();
+    const unmatchedBlocks: typeof blocks = [];
 
-    const preMatched: SuggestedEntry[] = [];
-    const preUnmatched: typeof blocks = [];
+    function addMatch(activityId: string, secs: number, confidence: 'high' | 'medium' | 'low', source: string, title?: string) {
+      const existing = matched.get(activityId) || {
+        totalSecs: 0,
+        confidence,
+        source: source as any,
+        titles: new Set<string>(),
+        customerName: activitiesWithCustomer.find(a => a.id === activityId)?.customerName,
+      };
+      existing.totalSecs += secs;
+      // Keep highest confidence
+      const confOrder = { high: 3, medium: 2, low: 1 };
+      if (confOrder[confidence] > confOrder[existing.confidence]) {
+        existing.confidence = confidence;
+        existing.source = source as any;
+      }
+      if (title) existing.titles.add(title);
+      matched.set(activityId, existing);
+    }
 
-    // Group blocks by matched activityId from project mapping
-    const byMappedActivity = new Map<string, { totalSecs: number; titles: Set<string>; customerName?: string }>();
-
+    // 1.1 Match screen sessions
     for (const b of blocks) {
+      let wasMatched = false;
+
       // Extract project from brackets [project]
       const bracketMatch = b.title.match(/\[([^\]]+)\]/);
       const project = bracketMatch ? bracketMatch[1].trim() : null;
-      const mapping = project ? projectMap[project] : null;
 
-      if (mapping) {
-        const act = activitiesWithCustomer.find(a => a.id === mapping.activityId);
-        const existing = byMappedActivity.get(mapping.activityId) || { totalSecs: 0, titles: new Set(), customerName: act?.customerName };
-        existing.totalSecs += b.totalSeconds;
-        const cleanTitle = b.title.replace(/\s*\[[^\]]*\]\s*/g, '').replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁]\s*/, '').trim();
-        if (cleanTitle && cleanTitle.length > 3) existing.titles.add(cleanTitle);
-        byMappedActivity.set(mapping.activityId, existing);
-      } else {
-        // Also try matching by domain/title to customer name (for Chrome etc.)
-        const match = tryMatch(b, activities.activities, customers.customers);
-        if (match.activityId) {
-          const existing = byMappedActivity.get(match.activityId) || { totalSecs: 0, titles: new Set(), customerName: match.customerName };
-          existing.totalSecs += b.totalSeconds;
-          const cleanTitle = b.title.replace(/\s*\[[^\]]*\]\s*/g, '').replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁]\s*/, '').trim();
-          if (cleanTitle && cleanTitle.length > 3) existing.titles.add(cleanTitle);
-          byMappedActivity.set(match.activityId, existing);
-        } else {
-          preUnmatched.push(b);
+      // Priority 1: Project mapping from brackets (cmux)
+      if (project && projectMap[project]) {
+        addMatch(projectMap[project].activityId, b.totalSeconds, 'high', 'cmux', b.title);
+        wasMatched = true;
+      }
+
+      // Priority 2: Client-specific domains (not internal ERP)
+      if (!wasMatched && b.domain) {
+        const domain = b.domain.toLowerCase();
+        const isInternal = domain.includes('kreaddis.com');
+        const isGeneric = domain.includes('google.com') || domain.includes('microsoft.com') || domain.includes('github.com');
+
+        if (!isInternal && !isGeneric) {
+          for (const customer of customers.customers) {
+            if (domain.includes(customer.name.toLowerCase())) {
+              const activity = activities.activities.find(a => a.customerId === customer.id);
+              if (activity) {
+                addMatch(activity.id, b.totalSeconds, 'high', 'domain', b.title);
+                wasMatched = true;
+                break;
+              }
+            }
+          }
         }
+
+        // Internal ERP → default to Interne
+        if (!wasMatched && isInternal) {
+          const interneCustomer = customers.customers.find(c => c.name.toLowerCase() === 'interne');
+          if (interneCustomer) {
+            const interneActivity = activities.activities.find(a => a.customerId === interneCustomer.id);
+            if (interneActivity) {
+              addMatch(interneActivity.id, b.totalSeconds, 'low', 'default', b.title);
+              wasMatched = true;
+            }
+          }
+        }
+      }
+
+      // Priority 3: Meet/Teams — match by title
+      if (!wasMatched && b.domain && (b.domain.includes('meet.google.com') || b.domain.includes('teams.microsoft.com'))) {
+        const titleLower = b.title.toLowerCase();
+        for (const customer of customers.customers) {
+          if (titleLower.includes(customer.name.toLowerCase())) {
+            const activity = activities.activities.find(a => a.customerId === customer.id);
+            if (activity) {
+              addMatch(activity.id, b.totalSeconds, 'medium', 'calendar', b.title);
+              wasMatched = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!wasMatched && b.totalMinutes >= 1) {
+        unmatchedBlocks.push(b);
       }
     }
 
-    for (const [activityId, data] of byMappedActivity) {
+    // 1.2 Add Claude Code prompt time
+    const claudeTimeByProject: Record<string, number> = {};
+    for (const p of (tracking.claudePrompts || []) as any[]) {
+      if (p.project) {
+        claudeTimeByProject[p.project] = (claudeTimeByProject[p.project] || 0) + 180; // 3 min per prompt in seconds
+      }
+    }
+    for (const [project, secs] of Object.entries(claudeTimeByProject)) {
+      if (projectMap[project]) {
+        addMatch(projectMap[project].activityId, secs, 'high', 'claude');
+      }
+    }
+
+    // Build suggested entries from matches
+    let suggestedEntries: SuggestedEntry[] = [];
+    for (const [activityId, data] of matched) {
       const totalMinutes = Math.round(data.totalSecs / 60);
       if (totalMinutes < 2) continue;
-
-      // Build description: empty for now, LLM or summary will fill it
-      const description = '';
-
-      preMatched.push({
+      suggestedEntries.push({
         activityId,
         customerName: data.customerName,
-        description,
+        description: '',
         totalMinutes,
         roundedMinutes: Math.max(15, Math.ceil(totalMinutes / 15) * 15),
-        confidence: 0.9,
-        blockCount: 1,
+        confidence: data.confidence,
+        source: data.source,
+        blockCount: data.titles.size,
       });
     }
 
+    let unmatched = unmatchedBlocks;
+
     let summary = '';
-    let suggestedEntries: SuggestedEntry[] = [...preMatched];
-    let unmatched: typeof blocks = [...preUnmatched];
     let aiEnhanced = false;
 
     // Try LLM to enhance descriptions and match remaining unmatched blocks
@@ -181,9 +244,7 @@ export function createReportRouter(storage: Storage) {
           }
         }
 
-        // Load project mappings so the LLM knows which directories map to which clients
-        const config = await storage.loadTrackingConfig() as any;
-        const projectMap = config.projectMap || {};
+        // Build project mappings for LLM context
         const projectMappings: { project: string; activityId: string; label: string }[] = [];
         for (const [project, mapping] of Object.entries(projectMap)) {
           const act = activitiesWithCustomer.find(a => a.id === (mapping as any).activityId);
@@ -216,7 +277,7 @@ export function createReportRouter(storage: Storage) {
           })),
           activities: activitiesWithCustomer.map(a => ({
             ...a,
-            id: idToAlias[a.id] || a.id, // Use short alias if this activity is in the suggested entries
+            id: idToAlias[a.id] || a.id,
           })),
           projectMappings: projectMappings.map(m => ({
             ...m,
@@ -248,7 +309,8 @@ export function createReportRouter(storage: Storage) {
                 description: s.description,
                 totalMinutes: s.totalMinutes,
                 roundedMinutes: Math.max(15, Math.ceil(s.totalMinutes / 15) * 15),
-                confidence: 0.7,
+                confidence: 'medium',
+                source: 'llm',
                 blockCount: 1,
               });
             }
@@ -334,17 +396,6 @@ export function createReportRouter(storage: Storage) {
       }
     }
 
-    // Fallback: basic matching if LLM failed or unavailable
-    if (suggestedEntries.length === 0) {
-      const matchedBlocks = blocks.map(block => {
-        const match = tryMatch(block, activities.activities, customers.customers);
-        return { ...block, ...match };
-      });
-      suggestedEntries = buildSuggestedEntries(matchedBlocks);
-      unmatched = matchedBlocks
-        .filter(b => !b.activityId && b.totalMinutes >= 1);
-    }
-
     suggestedEntries.sort((a, b) => b.totalMinutes - a.totalMinutes);
 
     const report = {
@@ -360,6 +411,7 @@ export function createReportRouter(storage: Storage) {
       })),
       totalTrackedMinutes,
       aiEnhanced,
+      gaps,
     };
 
     tracking.report = report;
@@ -535,141 +587,3 @@ function aggregateSessions(sessions: ScreenSession[]): AggregatedBlock[] {
     .sort((a, b) => b.totalSeconds - a.totalSeconds);
 }
 
-function tryMatch(
-  block: AggregatedBlock,
-  activities: { id: string; name: string; customerId: string }[],
-  customers: { id: string; name: string; type: string }[],
-): { activityId?: string; customerName?: string; confidence: number } {
-  const domain = (block.domain ?? '').toLowerCase();
-  const url = (block.url ?? '').toLowerCase();
-  const fullTitle = block.title.toLowerCase();
-  // Title without brackets (for primary matching)
-  const titleClean = block.title.replace(/\s*\[[^\]]*\]\s*/g, '').toLowerCase();
-  // Project names from brackets (for fallback matching)
-  const bracketMatch = block.title.match(/\[([^\]]+)\]/);
-  const projectNames = bracketMatch
-    ? bracketMatch[1].split(',').map(p => p.trim().toLowerCase())
-    : [];
-
-  // Priority 1: Match by domain (most reliable)
-  for (const customer of customers) {
-    const custLower = customer.name.toLowerCase();
-    if (domain && domain.includes(custLower)) {
-      const activity = activities.find(a => a.customerId === customer.id);
-      if (activity) {
-        return { activityId: activity.id, customerName: customer.name, confidence: 0.9 };
-      }
-    }
-  }
-
-  // Priority 2: Match by client-specific domains (e.g. gemaddis-erp.odoo.com, baouw.odoo.com)
-  if (domain && !domain.includes('kreaddis.com') && !domain.includes('google.com') && !domain.includes('microsoft.com') && !domain.includes('github.com')) {
-    for (const customer of customers) {
-      const custLower = customer.name.toLowerCase();
-      if (domain.includes(custLower)) {
-        const activity = activities.find(a => a.customerId === customer.id);
-        if (activity) {
-          return { activityId: activity.id, customerName: customer.name, confidence: 0.85 };
-        }
-      }
-    }
-  }
-
-  // Priority 3: Match tab/window title to customer — for Meet/Teams (meeting titles) and non-ERP
-  const isInternalERP = domain.includes('kreaddis.com');
-  const isMeeting = domain.includes('meet.google.com') || domain.includes('teams.microsoft.com');
-  if (isMeeting || (block.totalMinutes >= 5 && !isInternalERP)) {
-    for (const customer of customers) {
-      const custLower = customer.name.toLowerCase();
-      if (titleClean.includes(custLower)) {
-        const activity = activities.find(a => a.customerId === customer.id);
-        if (activity) {
-          return { activityId: activity.id, customerName: customer.name, confidence: 0.7 };
-        }
-      }
-    }
-  }
-
-  // Priority 3: Match project names from brackets to customer (fallback)
-  // Only match if there's exactly ONE customer match (avoid ambiguity)
-  if (projectNames.length > 0) {
-    const matches: { activityId: string; customerName: string }[] = [];
-    for (const customer of customers) {
-      const custLower = customer.name.toLowerCase();
-      for (const proj of projectNames) {
-        if (proj.includes(custLower) || custLower.includes(proj)) {
-          const activity = activities.find(a => a.customerId === customer.id);
-          if (activity) {
-            matches.push({ activityId: activity.id, customerName: customer.name });
-            break;
-          }
-        }
-      }
-    }
-    if (matches.length === 1) {
-      return { ...matches[0], confidence: 0.6 };
-    }
-  }
-
-  // Priority 4: Match activity name in domain, title, or URL
-  for (const activity of activities) {
-    const actLower = activity.name.toLowerCase();
-    if (domain.includes(actLower) || fullTitle.includes(actLower) || url.includes(actLower)) {
-      const customer = customers.find(c => c.id === activity.customerId);
-      return { activityId: activity.id, customerName: customer?.name, confidence: 0.6 };
-    }
-  }
-
-  return { confidence: 0 };
-}
-
-interface SuggestedEntry {
-  activityId: string;
-  customerName?: string;
-  description: string;
-  totalMinutes: number;
-  roundedMinutes: number;
-  confidence: number;
-  blockCount: number;
-}
-
-function buildSuggestedEntries(blocks: (AggregatedBlock & { activityId?: string; customerName?: string; confidence: number })[]): SuggestedEntry[] {
-  const byActivity = new Map<string, { totalSecs: number; titles: Set<string>; confidence: number; customerName?: string; count: number }>();
-
-  for (const b of blocks) {
-    if (!b.activityId) continue;
-    const existing = byActivity.get(b.activityId) || { totalSecs: 0, titles: new Set(), confidence: 0, customerName: b.customerName, count: 0 };
-    existing.totalSecs += b.totalSeconds;
-    // Clean title for description: remove bracket content, keep meaningful part
-    const cleanTitle = b.title
-      .replace(/\s*\[[^\]]*\]\s*/g, '')  // Remove [project,names]
-      .replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁]\s*/, '') // Remove spinner chars
-      .trim();
-    if (cleanTitle && cleanTitle.length > 3) existing.titles.add(cleanTitle);
-    existing.confidence = Math.max(existing.confidence, b.confidence);
-    existing.count++;
-    byActivity.set(b.activityId, existing);
-  }
-
-  const entries: SuggestedEntry[] = [];
-  for (const [activityId, data] of byActivity) {
-    const totalMinutes = Math.round(data.totalSecs / 60);
-    // Skip activities with less than 2 minutes total (likely just quick glances)
-    if (totalMinutes < 2) continue;
-    // Keep raw titles as context for LLM, but use a clean default description
-    const rawTitles = [...data.titles].slice(0, 5);
-    const titles = rawTitles.join(', ');
-    const roundedMinutes = Math.max(15, Math.ceil(totalMinutes / 15) * 15);
-    entries.push({
-      activityId,
-      customerName: data.customerName,
-      description: titles,
-      totalMinutes,
-      roundedMinutes,
-      confidence: data.confidence,
-      blockCount: data.count,
-    });
-  }
-
-  return entries.sort((a, b) => b.totalMinutes - a.totalMinutes);
-}

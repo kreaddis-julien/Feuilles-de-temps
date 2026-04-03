@@ -104,11 +104,12 @@ export interface ReportBlock {
   app: string;
   title: string;
   url?: string;
+  domain?: string;
   totalMinutes: number;
   totalSeconds: number;
   activityId?: string;
   customerName?: string;
-  confidence: 'high' | 'medium' | 'low';
+  confidence?: 'high' | 'medium' | 'low';
 }
 
 export interface SuggestedEntry {
