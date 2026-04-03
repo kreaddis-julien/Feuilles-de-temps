@@ -73,34 +73,12 @@ export function createReportRouter(storage: Storage) {
       }
     }
 
-    // Build descriptions from Claude prompts when available, fall back to titles
-    const claudePromptsByProject: Record<string, string[]> = {};
-    for (const p of (tracking.claudePrompts || []) as any[]) {
-      if (p.project && p.prompt && p.prompt.length > 10) {
-        if (!claudePromptsByProject[p.project]) claudePromptsByProject[p.project] = [];
-        claudePromptsByProject[p.project].push(p.prompt);
-      }
-    }
-
     for (const [activityId, data] of byMappedActivity) {
       const totalMinutes = Math.round(data.totalSecs / 60);
       if (totalMinutes < 2) continue;
 
-      // Find matching project name from mapping
-      let description = [...data.titles].slice(0, 3).join(', ');
-      for (const [project, mapping] of Object.entries(projectMap)) {
-        if ((mapping as any).activityId === activityId && claudePromptsByProject[project]) {
-          // Use first few meaningful prompts as description
-          const meaningfulPrompts = claudePromptsByProject[project]
-            .filter(p => p.length > 15 && !p.startsWith('ok') && !p.startsWith('oui') && !p.startsWith('non'))
-            .slice(0, 3)
-            .map(p => p.slice(0, 60));
-          if (meaningfulPrompts.length > 0) {
-            description = meaningfulPrompts.join(' / ');
-          }
-          break;
-        }
-      }
+      // Build description: empty for now, LLM or summary will fill it
+      const description = '';
 
       preMatched.push({
         activityId,
@@ -157,12 +135,20 @@ export function createReportRouter(storage: Storage) {
           }
         }
 
-        // Send ALL blocks to LLM (no pre-matching)
+        // Use short aliases for activityIds so the LLM copies them correctly
+        const aliasToId: Record<string, string> = {};
+        const idToAlias: Record<string, string> = {};
+        suggestedEntries.forEach((e, i) => {
+          const alias = `A${i + 1}`;
+          aliasToId[alias] = e.activityId;
+          idToAlias[e.activityId] = alias;
+        });
+
         const llmResult = await analyzeReport({
           date: req.params.date,
-          blocks: suggestedEntries.map(e => {
+          blocks: suggestedEntries.map((e, i) => {
             const act = activitiesWithCustomer.find(a => a.id === e.activityId);
-            return { app: act ? `${act.customerName} - ${act.name}` : '', title: e.description, totalMinutes: e.totalMinutes, activityId: e.activityId };
+            return { app: act ? `${act.customerName} - ${act.name}` : '', title: e.description, totalMinutes: e.totalMinutes, activityId: `A${i + 1}` };
           }),
           unmatched: unmatched.filter(b => b.totalMinutes >= 1).map(b => ({ app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes })),
           audioTranscripts,
@@ -171,18 +157,26 @@ export function createReportRouter(storage: Storage) {
             project: c.project || '',
             prompt: c.prompt || '',
           })),
-          activities: activitiesWithCustomer,
-          projectMappings,
+          activities: activitiesWithCustomer.map(a => ({
+            ...a,
+            id: idToAlias[a.id] || a.id, // Use short alias if this activity is in the suggested entries
+          })),
+          projectMappings: projectMappings.map(m => ({
+            ...m,
+            activityId: idToAlias[m.activityId] || m.activityId,
+          })),
           recentTimesheets: recentExamples.slice(-20),
         });
 
         summary = llmResult.summary;
         aiEnhanced = true;
 
-        // Merge LLM suggestions into suggested entries (only valid activityIds)
+        // Merge LLM suggestions — remap aliases back to real IDs
         const validActivityIds = new Set(activities.activities.map(a => a.id));
         for (const s of llmResult.suggestions) {
-          if (s.activityId && validActivityIds.has(s.activityId)) {
+          const realId = aliasToId[s.activityId] || s.activityId;
+          if (realId && (validActivityIds.has(realId) || aliasToId[s.activityId])) {
+            s.activityId = realId;
             const existing = suggestedEntries.find(e => e.activityId === s.activityId);
             if (existing) {
               // LLM might provide better description
@@ -206,6 +200,80 @@ export function createReportRouter(storage: Storage) {
       } catch (err) {
         console.error('[report] LLM analysis failed:', err);
         // Fallback to basic matching
+      }
+    }
+
+    // Generate descriptions via a simple dedicated LLM call
+    if (aiEnhanced) {
+      try {
+        const { generateWithLLM } = await import('../ollama.js');
+
+        // Build context per activity
+        const claudePromptsByProject: Record<string, string[]> = {};
+        for (const p of (tracking.claudePrompts || []) as any[]) {
+          if (p.project && p.prompt && p.prompt.length > 10) {
+            if (!claudePromptsByProject[p.project]) claudePromptsByProject[p.project] = [];
+            claudePromptsByProject[p.project].push(p.prompt);
+          }
+        }
+
+        const lines: string[] = [];
+        for (let i = 0; i < suggestedEntries.length; i++) {
+          const entry = suggestedEntries[i];
+          const act = activitiesWithCustomer.find(a => a.id === entry.activityId);
+          const label = act ? `${act.customerName} - ${act.name}` : 'Inconnu';
+
+          // Find prompts for this activity
+          let prompts: string[] = [];
+          for (const [project, mapping] of Object.entries(projectMap)) {
+            if ((mapping as any).activityId === entry.activityId && claudePromptsByProject[project]) {
+              prompts = claudePromptsByProject[project]
+                .filter(p => p.length > 15 && !/^(ok|oui|non|je|on |c'est)/i.test(p.trim()))
+                .slice(0, 5)
+                .map(p => p.slice(0, 60));
+              break;
+            }
+          }
+
+          // Find screen titles for this activity
+          const screenTitles = blocks
+            .filter(b => {
+              const bracket = b.title.match(/\[([^\]]+)\]/);
+              if (!bracket) return false;
+              const proj = bracket[1].trim();
+              return projectMap[proj] && (projectMap[proj] as any).activityId === entry.activityId;
+            })
+            .map(b => b.title.replace(/\s*\[[^\]]*\]/, '').replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁·*•]\s*/, '').trim())
+            .filter(t => t.length > 3)
+            .slice(0, 3);
+
+          const context = [
+            ...prompts.map(p => `prompt: "${p}"`),
+            ...screenTitles.map(t => `écran: "${t}"`),
+          ].join(', ') || `${entry.totalMinutes}min de travail`;
+
+          lines.push(`${i + 1}. ${label} (${entry.totalMinutes}min) : ${context}`);
+        }
+
+        if (lines.length > 0) {
+          const descPrompt = `Pour chaque ligne, écris UNE description courte et professionnelle pour une feuille de temps. Pas de numérotation, juste la description sur chaque ligne.\n\n${lines.join('\n')}\n\nRéponds avec une description par ligne, rien d'autre :`;
+          const descResult = await generateWithLLM(descPrompt);
+          const descLines = descResult.trim().split('\n').map(l => l.replace(/^\d+[\.\)]\s*/, '').trim()).filter(l => l.length > 3);
+
+          for (let i = 0; i < Math.min(suggestedEntries.length, descLines.length); i++) {
+            suggestedEntries[i].description = descLines[i];
+          }
+        }
+      } catch (err) {
+        console.error('[report] Description generation failed:', err);
+      }
+    }
+
+    // Fallback for entries still without description
+    for (const entry of suggestedEntries) {
+      if (!entry.description) {
+        const act = activitiesWithCustomer.find(a => a.id === entry.activityId);
+        entry.description = act ? `${act.customerName} - ${act.name}` : '';
       }
     }
 

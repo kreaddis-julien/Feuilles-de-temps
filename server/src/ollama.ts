@@ -106,19 +106,20 @@ RÈGLES DE CORRESPONDANCE :
 - IMPORTANT : ne mets PAS tout dans le même client. Regarde attentivement les crochets de CHAQUE bloc et utilise le mapping.
 
 Retourne UNIQUEMENT un JSON :
-{"summary":"résumé français 2-3 phrases","suggestions":[{"activityId":"ID_existant","description":"description métier courte","totalMinutes":nombre}]}
+{"summary":"résumé français 2-3 phrases","suggestions":[{"activityId":"ID","description":"description métier courte","totalMinutes":nombre}]}
 
-IMPORTANT :
+RÈGLES :
+- "summary" : résume la journée en mentionnant les clients/projets.
+- "suggestions" : pour les BLOCS NON IDENTIFIÉS UNIQUEMENT, essaie de deviner l'activité avec le mapping.
 - activityId DOIT être un ID de la liste ci-dessus. Si tu ne sais pas, mets "".
-- Regroupe les blocs du même client/projet en UNE seule suggestion.
-- La somme des totalMinutes doit être cohérente avec l'activité écran.
-- N'invente PAS de données. Base-toi uniquement sur les blocs fournis.`;
+- N'invente PAS de données.`;
 
   const response = await generateWithLLM(prompt, model);
 
   // Parse JSON from response (LLM might wrap it in markdown)
   const jsonMatch = response.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
+    console.log('[ollama] No JSON found in response');
     return { summary: '', suggestions: [] };
   }
 
