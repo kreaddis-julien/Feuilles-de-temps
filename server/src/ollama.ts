@@ -19,7 +19,7 @@ export async function checkOllama(): Promise<OllamaStatus> {
   }
 }
 
-export async function generateWithLLM(prompt: string, model = 'qwen2.5:14b'): Promise<string> {
+export async function generateWithLLM(prompt: string, model = 'qwen3.5:27b', format?: 'json'): Promise<string> {
   const resp = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -27,6 +27,7 @@ export async function generateWithLLM(prompt: string, model = 'qwen2.5:14b'): Pr
       model,
       prompt,
       stream: false,
+      ...(format ? { format } : {}),
       options: { temperature: 0.1 },
     }),
   });
@@ -56,7 +57,7 @@ export interface LLMSuggestedEntry {
   totalMinutes: number;
 }
 
-export async function analyzeReport(input: LLMReportInput, model = 'qwen2.5:14b'): Promise<{
+export async function analyzeReport(input: LLMReportInput, model = 'qwen3.5:27b'): Promise<{
   summary: string;
   suggestions: LLMSuggestedEntry[];
 }> {
@@ -114,7 +115,7 @@ RÈGLES :
 - activityId DOIT être un ID de la liste ci-dessus. Si tu ne sais pas, mets "".
 - N'invente PAS de données.`;
 
-  const response = await generateWithLLM(prompt, model);
+  const response = await generateWithLLM(prompt, model, 'json');
 
   // Parse JSON from response (LLM might wrap it in markdown)
   const jsonMatch = response.match(/\{[\s\S]*\}/);
