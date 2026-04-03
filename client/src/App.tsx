@@ -61,6 +61,7 @@ function AppInner() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFrom, setExportFrom] = useState('');
   const [exportTo, setExportTo] = useState('');
+  const [exportMode, setExportMode] = useState<'day' | 'week' | 'month' | 'custom' | 'all'>('week');
   const [deferredEntries, setDeferredEntries] = useState<{ date: string; entry: TimesheetEntry }[]>([]);
   const [deferredOpen, setDeferredOpen] = useState(false);
   const navigate = useNavigate();
@@ -93,25 +94,38 @@ function AppInner() {
   }, [qrOpen, mobileUrl]);
 
   function openExportDialog() {
-    const today = todayStr();
-    const monday = mondayOf(today);
-    const sunday = addDays(monday, 6);
-    setExportFrom(monday);
-    setExportTo(sunday);
+    setExportMode('week');
     setExportOpen(true);
   }
 
+  function getExportRange(): { from: string; to: string } {
+    const today = todayStr();
+    switch (exportMode) {
+      case 'day': return { from: today, to: today };
+      case 'week': { const m = mondayOf(today); return { from: m, to: addDays(m, 6) }; }
+      case 'month': {
+        const [y, m] = today.split('-').map(Number);
+        const lastDay = new Date(y, m, 0).getDate();
+        return { from: `${y}-${String(m).padStart(2, '0')}-01`, to: `${y}-${String(m).padStart(2, '0')}-${lastDay}` };
+      }
+      case 'all': return { from: '2020-01-01', to: today };
+      case 'custom': return { from: exportFrom, to: exportTo };
+    }
+  }
+
   async function handleExport() {
-    const url = exportFrom === exportTo
-      ? api.getExportUrl(exportFrom)
-      : api.getExportRangeUrl(exportFrom, exportTo);
+    const { from, to } = getExportRange();
+    const url = from === to
+      ? api.getExportUrl(from)
+      : api.getExportRangeUrl(from, to);
     const res = await fetch(url);
+    if (!res.ok) return;
     const blob = await res.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = exportFrom === exportTo
-      ? `timesheet-${exportFrom}.csv`
-      : `timesheet-${exportFrom}-to-${exportTo}.csv`;
+    a.download = from === to
+      ? `timesheet-${from}.csv`
+      : `timesheet-${from}-to-${to}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
     setExportOpen(false);
@@ -262,19 +276,53 @@ function AppInner() {
         </DialogContent>
       </Dialog>
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
-        <DialogContent className="max-w-xs">
+        <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Exporter CSV</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-muted-foreground">Du</label>
-              <DatePicker value={exportFrom} onChange={setExportFrom} />
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { key: 'day', label: "Aujourd'hui" },
+                { key: 'week', label: 'Cette semaine' },
+                { key: 'month', label: 'Ce mois' },
+                { key: 'all', label: 'Tout' },
+              ] as const).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setExportMode(key)}
+                  className={`px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    exportMode === key
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-muted-foreground">Au</label>
-              <DatePicker value={exportTo} onChange={setExportTo} />
-            </div>
+            <button
+              onClick={() => {
+                setExportMode('custom');
+                const today = todayStr();
+                if (!exportFrom) setExportFrom(mondayOf(today));
+                if (!exportTo) setExportTo(today);
+              }}
+              className={`w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                exportMode === 'custom'
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
+              }`}
+            >
+              Période personnalisée
+            </button>
+            {exportMode === 'custom' && (
+              <div className="flex items-center gap-2">
+                <DatePicker value={exportFrom} onChange={setExportFrom} className="w-auto flex-1" />
+                <span className="text-muted-foreground shrink-0">—</span>
+                <DatePicker value={exportTo} onChange={setExportTo} className="w-auto flex-1" align="end" />
+              </div>
+            )}
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setExportOpen(false)}>Annuler</Button>

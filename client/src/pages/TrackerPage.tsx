@@ -99,7 +99,7 @@ function parseTimestamp(value: string): Date {
 // ---------------------------------------------------------------------------
 
 export default function TrackerPage() {
-  const [currentDate, setCurrentDate] = useState(todayStr);
+  const [currentDate, setCurrentDate] = useState(() => localStorage.getItem('trackerDate') || todayStr());
   const [day, setDay] = useState<TimesheetDay | null>(null);
   const [activities, setActivities] = useState<ActivitiesData>({ activities: [] });
   const [customers, setCustomers] = useState<CustomersData>({ customers: [] });
@@ -136,6 +136,15 @@ export default function TrackerPage() {
     syncChannel.current.onmessage = () => refresh();
   }, [refresh]);
   useEffect(() => { localStorage.setItem('trackerDate', currentDate); }, [currentDate]);
+  // Listen for date changes from deferred entries menu
+  useEffect(() => {
+    const handler = () => {
+      const stored = localStorage.getItem('trackerDate');
+      if (stored && stored !== currentDate) setCurrentDate(stored);
+    };
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
+  }, [currentDate]);
 
   function shiftDate(offset: number) {
     const [y, m, d] = currentDate.split('-').map(Number);
