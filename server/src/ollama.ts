@@ -55,7 +55,6 @@ export interface LLMReportInput {
   blocks: { app: string; title: string; domain?: string; totalMinutes: number; activityId?: string }[];
   unmatched: { app: string; title: string; domain?: string; totalMinutes: number }[];
   activities: { id: string; name: string; customerName: string }[];
-  audioTranscripts?: { time: string; text: string }[];
   claudePrompts?: { time: string; project: string; prompt: string }[];
   projectMappings?: { project: string; activityId: string; label: string }[];
   recentTimesheets?: { date: string; activityId: string; activityLabel: string; description: string; minutes: number }[];
@@ -80,9 +79,6 @@ export async function analyzeReport(input: LLMReportInput, model = 'qwen3.5:9b-q
     .map(b => `- ${b.app} | ${b.title} ${b.domain ? `(${b.domain})` : ''} | ${b.totalMinutes}min`)
     .join('\n');
 
-  const audioSection = input.audioTranscripts?.length
-    ? `\nTRANSCRIPTIONS AUDIO (micro, conversations captées) :\n${input.audioTranscripts.map(a => `- [${a.time}] ${a.text}`).join('\n')}\n`
-    : '';
 
   const mappingSection = input.projectMappings?.length
     ? `\nMAPPING RÉPERTOIRES → ACTIVITÉS :\n${input.projectMappings.map(m => `- Répertoire "${m.project}" → activityId "${m.activityId}" (${m.label})`).join('\n')}\n`
@@ -116,7 +112,7 @@ ${activitiesList}
 
 BLOCS NON IDENTIFIÉS DU ${input.date} :
 ${unmatchedList}
-${mappingSection}${audioSection}${claudeSection}${historySection}
+${mappingSection}${claudeSection}${historySection}
 Analyse ces blocs et retourne le JSON.`;
 
   const resp = await fetch(`${OLLAMA_URL}/api/chat`, {

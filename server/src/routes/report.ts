@@ -29,35 +29,6 @@ export function createReportRouter(storage: Storage) {
     // Aggregate sessions by app+title into time blocks
     const blocks = aggregateSessions(tracking.screenSessions);
 
-    // Add audio conversation time as virtual blocks
-    // Each audio segment represents 30s of active conversation
-    // Try to attribute to the screen session that was active at the same time
-    for (const seg of (tracking.audioSegments || []) as any[]) {
-      if (!seg.hasSpeech || !seg.transcript) continue;
-      const segTime = new Date(seg.timestamp).getTime();
-
-      // Find what was on screen at this time
-      let matchedScreen = false;
-      for (const s of tracking.screenSessions) {
-        const sFrom = new Date(s.from).getTime();
-        const sUntil = new Date(s.until).getTime();
-        if (segTime >= sFrom - 30000 && segTime <= sUntil + 30000) {
-          // Audio happened during this screen session — already counted
-          matchedScreen = true;
-          break;
-        }
-      }
-
-      if (!matchedScreen) {
-        // Audio during idle/no screen activity — add as "conversation" block
-        blocks.push({
-          from: seg.timestamp, to: seg.timestamp,
-          app: 'Conversation', title: seg.transcript.slice(0, 60),
-          totalSeconds: 30, totalMinutes: 1,
-        });
-      }
-    }
-
     const totalTrackedMinutes = blocks.reduce((s, b) => s + b.totalMinutes, 0);
 
     // Detect gaps (sleep/lock periods)
@@ -224,11 +195,6 @@ export function createReportRouter(storage: Storage) {
 
     if (hasLLM) {
       try {
-        const audioTranscripts = (tracking.audioSegments || [])
-          .filter((s: any) => s.hasSpeech && s.transcript)
-          .slice(-10)
-          .map((s: any) => ({ time: s.timestamp.slice(11, 16), text: s.transcript }));
-
         // Load recent timesheets as examples
         const recentExamples: { date: string; activityId: string; activityLabel: string; description: string; minutes: number }[] = [];
         const allDates = await storage.listDates();
@@ -272,7 +238,6 @@ export function createReportRouter(storage: Storage) {
             return { app: act ? `${act.customerName} - ${act.name}` : '', title: e.description, totalMinutes: e.totalMinutes, activityId: `A${i + 1}` };
           }),
           unmatched: unmatched.filter(b => b.totalMinutes >= 1).map(b => ({ app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes })),
-          audioTranscripts,
           claudePrompts: (tracking.claudePrompts || []).slice(-15).map((c: any) => ({
             time: c.timestamp?.slice(11, 16) || '',
             project: c.project || '',

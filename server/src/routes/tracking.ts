@@ -1,14 +1,7 @@
 import { Router } from 'express';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs/promises';
-import path from 'path';
-import os from 'os';
 import type { Storage } from '../storage.js';
 import type { ScreenSession, IdlePeriod } from '../types.js';
 import { checkOllama } from '../ollama.js';
-
-const execFileAsync = promisify(execFile);
 
 export function createTrackingRouter(storage: Storage) {
   const router = Router();
@@ -22,15 +15,6 @@ export function createTrackingRouter(storage: Storage) {
   router.put('/config/current', async (req, res) => {
     const config = await storage.loadTrackingConfig();
     if (req.body.screenEnabled !== undefined) config.screenEnabled = req.body.screenEnabled;
-    if (req.body.micEnabled !== undefined) {
-      config.micEnabled = req.body.micEnabled;
-      // Kill any running sox process immediately when mic is disabled
-      if (!config.micEnabled) {
-        try {
-          await execFileAsync('pkill', ['-f', 'sox.*tempo-mic']);
-        } catch { /* no sox running, that's fine */ }
-      }
-    }
     await storage.saveTrackingConfig(config);
     res.json(config);
   });
@@ -151,122 +135,6 @@ export function createTrackingRouter(storage: Storage) {
 
     await storage.saveTracking(data);
     res.json({ ok: true });
-  });
-
-  // Receive audio chunk, transcribe with whisper-cli, store transcript
-  router.post('/:date/audio', async (req, res) => {
-    const data = await storage.loadTracking(req.params.date);
-    const now = new Date().toISOString();
-
-    // Expect raw WAV data in body
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    const audioBuffer = Buffer.concat(chunks);
-
-    // Limit audio to 10MB
-    if (audioBuffer.length > 10 * 1024 * 1024) {
-      return res.status(413).json({ error: 'Audio too large' });
-    }
-
-    if (audioBuffer.length < 1000) {
-      return res.json({ ok: true, hasSpeech: false });
-    }
-
-    // Check audio energy level before transcribing (skip silence/low noise)
-    // WAV header is 44 bytes, then 16-bit PCM samples
-    const samples = new Int16Array(audioBuffer.buffer, audioBuffer.byteOffset + 44, Math.floor((audioBuffer.length - 44) / 2));
-    let sumSquares = 0;
-    for (let i = 0; i < samples.length; i++) {
-      sumSquares += samples[i] * samples[i];
-    }
-    const rms = Math.sqrt(sumSquares / samples.length);
-    // RMS < 500 = essentially silence/background noise (16-bit range is -32768 to 32767)
-    if (rms < 500) {
-      return res.json({ ok: true, hasSpeech: false, rms: Math.round(rms) });
-    }
-
-    // Write to temp file
-    const tmpDir = os.tmpdir();
-    const wavPath = path.join(tmpDir, `tempo-audio-${Date.now()}.wav`);
-    await fs.writeFile(wavPath, audioBuffer);
-
-    try {
-      // Use the best available whisper model (prefer large-v3-turbo > large-v3 > medium > small)
-      const modelsDir = path.join(os.homedir(), '.local/share/whisper-models');
-      let whisperModel = '';
-      for (const m of ['ggml-large-v3-turbo.bin', 'ggml-large-v3.bin', 'ggml-medium.bin', 'ggml-small.bin']) {
-        const p = path.join(modelsDir, m);
-        try { await fs.access(p); whisperModel = p; break; } catch { /* try next */ }
-      }
-
-      if (!whisperModel) {
-        await fs.unlink(wavPath).catch(() => {});
-        return res.status(503).json({ error: 'Whisper model not found' });
-      }
-
-      const { stdout } = await execFileAsync('/opt/homebrew/bin/whisper-cli', [
-        '-m', whisperModel,
-        '-f', wavPath,
-        '-l', 'fr',
-        '--no-timestamps',
-        '-t', '4',
-      ], { timeout: 60000 });
-
-      const transcript = stdout
-        .split('\n')
-        .map(l => l.trim())
-        .filter(l => l && !l.startsWith('[') && l !== '(Sous-titres')
-        .join(' ')
-        .trim();
-
-      // Only store if there's actual speech content (filter out whisper noise artifacts)
-      const noisePatterns = [
-        '(Propos inaudibles)', '(Sous-titres', '[BLANK_AUDIO]', '(Musique)',
-        '(Bruit)', '( )', '[Musique]', 'Propos inaudibles',
-        'Sous-titrage', 'Sous-titres', 'sous-titrage', 'sous-titres',
-        'Merci d\'avoir regardé', 'Merci d\'avoir', 'Merci de votre',
-        'Abonnez-vous', 'N\'oubliez pas', 'Like et abonnez',
-        'ST\'', 'STP', 'cette vidéo',
-        'tipeurs', 'souscripteurs', 'Salut mon gars',
-        'Merci à mes', 'Merci à tous',
-      ];
-      // Filter transcripts that are only sound effects: *Bruit*, *Toc*, *cough*, etc.
-      const cleaned = transcript
-        .replace(/\*[^*]+\*/g, '')  // Remove *sound effects*
-        .replace(/\s+/g, ' ')
-        .trim();
-      // Detect repeated phrases (hallucination pattern: "Salut mon gars. Salut mon gars.")
-      const sentences = cleaned.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 3);
-      const uniqueSentences = new Set(sentences);
-      const isRepetitive = sentences.length >= 2 && uniqueSentences.size === 1;
-
-      const hasSpeech = cleaned.length > 15 &&
-        !transcript.match(/^\[.*\]$/) &&
-        !transcript.match(/^\(.*\)$/) &&
-        !noisePatterns.some(p => transcript.includes(p)) &&
-        !transcript.match(/^[\s*\w\s]*\*[^*]+\*[\s*\w\s]*$/) &&
-        !isRepetitive;
-
-      if (hasSpeech) {
-        (data as any).audioSegments.push({
-          timestamp: now,
-          duration: 30,
-          transcript: cleaned,
-          hasSpeech: true,
-        });
-        await storage.saveTracking(data);
-      }
-
-      res.json({ ok: true, hasSpeech, transcript: hasSpeech ? transcript : '' });
-    } catch (err: any) {
-      console.error('[tracking] whisper error:', err.message);
-      res.json({ ok: true, hasSpeech: false, error: err.message });
-    } finally {
-      // Always cleanup temp file
-      await fs.unlink(wavPath).catch(() => {});
-    }
   });
 
   return router;

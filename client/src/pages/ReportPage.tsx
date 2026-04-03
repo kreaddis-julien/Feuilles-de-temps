@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { TrackingReport, SuggestedEntry, AudioSegment } from '../types';
+import type { TrackingReport, SuggestedEntry } from '../types';
 import * as api from '../api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ChevronLeft, FileText, Check, Clock, AlertCircle, Mic, ChevronDown, Terminal, Monitor, Sparkles } from 'lucide-react';
+import { ChevronLeft, FileText, Check, Clock, AlertCircle, ChevronDown, Terminal, Monitor, Sparkles } from 'lucide-react';
 
 function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -30,8 +30,6 @@ export default function ReportPage() {
   const [editEntries, setEditEntries] = useState<(SuggestedEntry & { selected: boolean })[]>([]);
   const [activities, setActivities] = useState<{ id: string; name: string; customerId: string }[]>([]);
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
-  const [audioSegments, setAudioSegments] = useState<AudioSegment[]>([]);
-  const [showAudio, setShowAudio] = useState(false);
   const [claudePrompts, setClaudePrompts] = useState<{ timestamp: string; project: string; prompt: string }[]>([]);
   const [showClaude, setShowClaude] = useState(false);
   const [screenSessions, setScreenSessions] = useState<{ from: string; until: string; app: string; title: string; url?: string }[]>([]);
@@ -56,7 +54,6 @@ export default function ReportPage() {
   async function selectDate(date: string) {
     setSelectedDate(date);
     setLoading(true);
-    setShowAudio(false);
     try {
       let r = await api.getReport(date);
       if (!r) {
@@ -74,7 +71,6 @@ export default function ReportPage() {
       })));
       // Load audio segments
       const tracking = await api.getTracking(date);
-      setAudioSegments(tracking.audioSegments.filter(s => s.hasSpeech));
       setClaudePrompts((tracking as any).claudePrompts || []);
       setScreenSessions(tracking.screenSessions || []);
     } catch {
@@ -90,8 +86,7 @@ export default function ReportPage() {
     const refreshTracking = async () => {
       try {
         const tracking = await api.getTracking(selectedDate);
-        setAudioSegments(tracking.audioSegments.filter(s => s.hasSpeech));
-        setClaudePrompts((tracking as any).claudePrompts || []);
+          setClaudePrompts((tracking as any).claudePrompts || []);
       setScreenSessions(tracking.screenSessions || []);
       } catch { /* ignore */ }
     };
@@ -496,29 +491,6 @@ export default function ReportPage() {
             </section>
           )}
 
-          {/* Audio transcriptions */}
-          {audioSegments.length > 0 && (
-            <section className="space-y-3">
-              <button
-                onClick={() => setShowAudio(v => !v)}
-                className="flex items-center gap-2 text-lg font-semibold hover:text-primary transition-colors"
-              >
-                <Mic className="h-4 w-4" />
-                Transcriptions audio ({audioSegments.length})
-                <ChevronDown className={`h-4 w-4 transition-transform ${showAudio ? 'rotate-180' : ''}`} />
-              </button>
-              {showAudio && (
-                <div className="space-y-1">
-                  {audioSegments.map((seg, i) => (
-                    <div key={i} className="flex gap-3 text-sm px-3 py-2 rounded-lg bg-muted/50">
-                      <span className="text-muted-foreground shrink-0 tabular-nums">{new Date(seg.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
-                      <span>{seg.transcript}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
 
           {/* Claude Code prompts */}
           {claudePrompts.length > 0 && (
