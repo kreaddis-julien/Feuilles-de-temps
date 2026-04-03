@@ -46,6 +46,7 @@ export interface LLMReportInput {
   activities: { id: string; name: string; customerName: string }[];
   audioTranscripts?: { time: string; text: string }[];
   claudePrompts?: { time: string; project: string; prompt: string }[];
+  projectMappings?: { project: string; activityId: string; label: string }[];
   recentTimesheets?: { date: string; activityId: string; activityLabel: string; description: string; minutes: number }[];
 }
 
@@ -76,6 +77,10 @@ export async function analyzeReport(input: LLMReportInput, model = 'qwen2.5:14b'
     ? `\nTRANSCRIPTIONS AUDIO (micro, conversations captées) :\n${input.audioTranscripts.map(a => `- [${a.time}] ${a.text}`).join('\n')}\n`
     : '';
 
+  const mappingSection = input.projectMappings?.length
+    ? `\nMAPPING RÉPERTOIRES → ACTIVITÉS (FAIT CONFIANCE À CES CORRESPONDANCES) :\n${input.projectMappings.map(m => `- Répertoire "${m.project}" → activityId "${m.activityId}" (${m.label})`).join('\n')}\n`
+    : '';
+
   const claudeSection = input.claudePrompts?.length
     ? `\nPROMPTS CLAUDE CODE (commandes de développement, donnent le contexte exact du travail) :\n${input.claudePrompts.map(c => `- [${c.time}] projet: ${c.project} | "${c.prompt.slice(0, 150)}"`).join('\n')}\n`
     : '';
@@ -91,13 +96,14 @@ ${activitiesList}
 
 ACTIVITÉ ÉCRAN DU ${input.date} :
 ${unmatchedList}
-${audioSection}${claudeSection}${historySection}
+${mappingSection}${audioSection}${claudeSection}${historySection}
 RÈGLES DE CORRESPONDANCE :
-- Les noms entre crochets [xxx] sont des répertoires de projets. "baouw" = Baouw, "psbe-gemaddis-erp" ou "gemaddis" = GemAddis, "Feuilles-de-temps" ou "feuille-de-temps" = travail interne KreAddis.
-- Les URLs contenant un nom de client identifient le client (ex: gemaddis.odoo.com = GemAddis, baouw = Baouw).
-- "cmux" et "Claude Code" sont des outils de développement — le projet dépend du répertoire entre crochets.
-- "timesheet" et "Tempo" = travail interne sur l'outil de suivi du temps.
+- Si un nom entre crochets [xxx] est présent, c'est le répertoire du projet actif. Utilise le MAPPING RÉPERTOIRES ci-dessus pour trouver l'activityId correspondant.
+- Les URLs contenant un nom de client identifient le client (ex: gemaddis.odoo.com = GemAddis).
+- "Claude Code", "cmux" SANS crochets = regarder les PROMPTS CLAUDE CODE pour deviner le projet.
+- "timesheet" = travail interne sur l'outil de suivi du temps.
 - NE COPIE PAS les titres de fenêtres dans les descriptions. Écris ce que la personne faisait (ex: "Développement site web", "Support client", "Migration DHL").
+- IMPORTANT : ne mets PAS tout dans le même client. Regarde attentivement les crochets de CHAQUE bloc et utilise le mapping.
 
 Retourne UNIQUEMENT un JSON :
 {"summary":"résumé français 2-3 phrases","suggestions":[{"activityId":"ID_existant","description":"description métier courte","totalMinutes":nombre}]}

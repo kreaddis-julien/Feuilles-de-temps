@@ -133,6 +133,11 @@ export const validateReport = (date: string, entries: { activityId: string; desc
     body: JSON.stringify({ entries }),
   });
 
+export const unvalidateReport = (date: string) =>
+  json<{ ok: boolean; entriesRemoved: number }>(`/report/${date}/unvalidate`, {
+    method: 'POST',
+  });
+
 // Deferred
 export const getDeferred = () =>
   json<{ date: string; entry: TimesheetEntry }[]>('/deferred');
