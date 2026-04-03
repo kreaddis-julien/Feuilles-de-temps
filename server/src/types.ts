@@ -68,10 +68,19 @@ export interface IdlePeriod {
   until: string;
 }
 
+export interface ClaudePrompt {
+  timestamp: string;
+  cwd: string;
+  prompt: string;
+  sessionId: string;
+  project: string;
+}
+
 export interface TrackingDay {
   date: string;
   screenSessions: ScreenSession[];
   audioSegments: AudioSegment[];
+  claudePrompts?: ClaudePrompt[];
   idlePeriods: IdlePeriod[];
   report: TrackingReport | null;
 }

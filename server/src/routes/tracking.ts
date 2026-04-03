@@ -63,6 +63,28 @@ export function createTrackingRouter(storage: Storage) {
     res.json({ ok: true });
   });
 
+  // Record a Claude Code prompt
+  router.post('/:date/claude', async (req, res) => {
+    const data = await storage.loadTracking(req.params.date);
+    const { timestamp, cwd, prompt, sessionId } = req.body;
+
+    if (!prompt || !prompt.trim()) {
+      return res.json({ ok: true, stored: false });
+    }
+
+    if (!data.claudePrompts) (data as any).claudePrompts = [];
+    (data as any).claudePrompts.push({
+      timestamp: timestamp || new Date().toISOString(),
+      cwd: cwd || '',
+      prompt: prompt.trim(),
+      sessionId: sessionId || '',
+      project: cwd ? cwd.split('/').pop() : '',
+    });
+
+    await storage.saveTracking(data);
+    res.json({ ok: true, stored: true });
+  });
+
   // Record an idle period
   router.post('/:date/idle', async (req, res) => {
     const data = await storage.loadTracking(req.params.date);
@@ -188,6 +210,49 @@ export function createTrackingRouter(storage: Storage) {
     } finally {
       // Always cleanup temp file
       await fs.unlink(wavPath).catch(() => {});
+    }
+  });
+
+  // Get project-to-activity mapping
+  router.get('/project-map', async (_req, res) => {
+    const config = await storage.loadTrackingConfig();
+    res.json((config as any).projectMap || {});
+  });
+
+  // Set project-to-activity mapping
+  router.put('/project-map', async (req, res) => {
+    const config = await storage.loadTrackingConfig() as any;
+    if (!config.projectMap) config.projectMap = {};
+    Object.assign(config.projectMap, req.body);
+    await storage.saveTrackingConfig(config);
+    res.json(config.projectMap);
+  });
+
+  // Check if a project directory is mapped
+  router.get('/project-map/:project', async (req, res) => {
+    const config = await storage.loadTrackingConfig() as any;
+    const map = config.projectMap || {};
+    const mapping = map[req.params.project];
+    if (mapping) {
+      const activities = await storage.loadActivities();
+      const customers = await storage.loadCustomers();
+      const activity = activities.activities.find(a => a.id === mapping.activityId);
+      const customer = activity ? customers.customers.find(c => c.id === activity.customerId) : null;
+      res.json({
+        mapped: true,
+        activityId: mapping.activityId,
+        activityName: activity?.name || '',
+        customerName: customer?.name || '',
+      });
+    } else {
+      // Return available activities for selection
+      const activities = await storage.loadActivities();
+      const customers = await storage.loadCustomers();
+      const options = activities.activities.map(a => {
+        const c = customers.customers.find(c => c.id === a.customerId);
+        return { id: a.id, label: c ? `${c.name} - ${a.name}` : a.name };
+      }).sort((a, b) => a.label.localeCompare(b.label));
+      res.json({ mapped: false, options });
     }
   });
 

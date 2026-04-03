@@ -45,6 +45,7 @@ export interface LLMReportInput {
   unmatched: { app: string; title: string; domain?: string; totalMinutes: number }[];
   activities: { id: string; name: string; customerName: string }[];
   audioTranscripts?: { time: string; text: string }[];
+  claudePrompts?: { time: string; project: string; prompt: string }[];
   recentTimesheets?: { date: string; activityId: string; activityLabel: string; description: string; minutes: number }[];
 }
 
@@ -75,6 +76,10 @@ export async function analyzeReport(input: LLMReportInput, model = 'qwen2.5:14b'
     ? `\nTRANSCRIPTIONS AUDIO (micro, conversations captées) :\n${input.audioTranscripts.map(a => `- [${a.time}] ${a.text}`).join('\n')}\n`
     : '';
 
+  const claudeSection = input.claudePrompts?.length
+    ? `\nPROMPTS CLAUDE CODE (commandes de développement, donnent le contexte exact du travail) :\n${input.claudePrompts.map(c => `- [${c.time}] projet: ${c.project} | "${c.prompt.slice(0, 150)}"`).join('\n')}\n`
+    : '';
+
   const historySection = input.recentTimesheets?.length
     ? `\nEXEMPLES DE TIMESHEETS RÉCENTS (pour apprendre le style de l'utilisateur) :\n${input.recentTimesheets.map(t => `- [${t.date}] ${t.activityLabel} | "${t.description}" | ${t.minutes}min`).join('\n')}\n`
     : '';
@@ -86,7 +91,7 @@ ${activitiesList}
 
 ACTIVITÉ ÉCRAN DU ${input.date} :
 ${unmatchedList}
-${audioSection}${historySection}
+${audioSection}${claudeSection}${historySection}
 RÈGLES DE CORRESPONDANCE :
 - Les noms entre crochets [xxx] sont des répertoires de projets. "baouw" = Baouw, "psbe-gemaddis-erp" ou "gemaddis" = GemAddis, "Feuilles-de-temps" ou "feuille-de-temps" = travail interne KreAddis.
 - Les URLs contenant un nom de client identifient le client (ex: gemaddis.odoo.com = GemAddis, baouw = Baouw).

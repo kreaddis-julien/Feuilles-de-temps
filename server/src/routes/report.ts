@@ -74,6 +74,11 @@ export function createReportRouter(storage: Storage) {
           blocks: [], // No pre-matched blocks
           unmatched: blocks.map(b => ({ app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes })),
           audioTranscripts,
+          claudePrompts: (tracking.claudePrompts || []).map((c: any) => ({
+            time: c.timestamp?.slice(11, 16) || '',
+            project: c.project || '',
+            prompt: c.prompt || '',
+          })),
           activities: activitiesWithCustomer,
           recentTimesheets: recentExamples.slice(-20),
         });
