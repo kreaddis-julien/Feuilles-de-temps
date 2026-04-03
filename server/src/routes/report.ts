@@ -181,16 +181,18 @@ export function createReportRouter(storage: Storage) {
       }
     }
 
-    // 1.2 Add Claude Code prompt time
-    const claudeTimeByProject: Record<string, number> = {};
+    // 1.2 Claude Code prompts — used as context for matching, NOT as additional time
+    // If a project has Claude prompts but NO screen time, attribute a minimal presence
+    const claudePromptsByProject: Record<string, number> = {};
     for (const p of (tracking.claudePrompts || []) as any[]) {
       if (p.project) {
-        claudeTimeByProject[p.project] = (claudeTimeByProject[p.project] || 0) + 180; // 3 min per prompt in seconds
+        claudePromptsByProject[p.project] = (claudePromptsByProject[p.project] || 0) + 1;
       }
     }
-    for (const [project, secs] of Object.entries(claudeTimeByProject)) {
-      if (projectMap[project]) {
-        addMatch(projectMap[project].activityId, secs, 'high', 'claude');
+    for (const [project, count] of Object.entries(claudePromptsByProject)) {
+      if (projectMap[project] && !matched.has(projectMap[project].activityId)) {
+        // No screen time for this project — add minimal presence (15 min)
+        addMatch(projectMap[project].activityId, 15 * 60, 'medium', 'claude');
       }
     }
 
