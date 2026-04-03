@@ -422,6 +422,83 @@ export function createReportRouter(storage: Storage) {
     res.json(report);
   });
 
+  // Regenerate descriptions for given entries (after manual assignment)
+  router.post('/:date/descriptions', async (req, res) => {
+    const { entries } = req.body as { entries: { activityId: string; totalMinutes: number }[] };
+    if (!entries?.length) return res.json({ descriptions: [] });
+
+    const tracking = await storage.loadTracking(req.params.date);
+    const activities = await storage.loadActivities();
+    const customers = await storage.loadCustomers();
+    const config = await storage.loadTrackingConfig() as any;
+    const projectMap = config.projectMap || {};
+
+    const activitiesWithCustomer = activities.activities.map(a => {
+      const c = customers.customers.find(c => c.id === a.customerId);
+      return { id: a.id, name: a.name, customerName: c?.name ?? '' };
+    });
+
+    // Build context per activity
+    const claudePromptsByProject: Record<string, string[]> = {};
+    for (const p of (tracking.claudePrompts || []) as any[]) {
+      if (p.project && p.prompt && p.prompt.length > 10) {
+        if (!claudePromptsByProject[p.project]) claudePromptsByProject[p.project] = [];
+        claudePromptsByProject[p.project].push(p.prompt);
+      }
+    }
+
+    const blocks = aggregateSessions(tracking.screenSessions);
+
+    try {
+      const { generateWithLLM } = await import('../ollama.js');
+      const lines: string[] = [];
+
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const act = activitiesWithCustomer.find(a => a.id === entry.activityId);
+        const label = act ? `${act.customerName} - ${act.name}` : 'Inconnu';
+
+        let prompts: string[] = [];
+        for (const [project, mapping] of Object.entries(projectMap)) {
+          if ((mapping as any).activityId === entry.activityId && claudePromptsByProject[project]) {
+            prompts = claudePromptsByProject[project]
+              .filter(p => p.length > 15 && !/^(ok|oui|non|je|on |c'est)/i.test(p.trim()))
+              .slice(0, 5)
+              .map(p => p.slice(0, 60));
+            break;
+          }
+        }
+
+        const screenTitles = blocks
+          .filter(b => {
+            const bracket = b.title.match(/\[([^\]]+)\]/);
+            if (!bracket) return false;
+            const proj = bracket[1].trim();
+            return projectMap[proj] && (projectMap[proj] as any).activityId === entry.activityId;
+          })
+          .map(b => b.title.replace(/\s*\[[^\]]*\]/, '').replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁·*•]\s*/, '').trim())
+          .filter(t => t.length > 3)
+          .slice(0, 3);
+
+        const context = [
+          ...prompts.map(p => `prompt: "${p}"`),
+          ...screenTitles.map(t => `écran: "${t}"`),
+        ].join(', ') || `${entry.totalMinutes}min de travail`;
+
+        lines.push(`${i + 1}. ${label} (${entry.totalMinutes}min) : ${context}`);
+      }
+
+      const descPrompt = `Pour chaque ligne, écris UNE description courte et professionnelle pour une feuille de temps. Pas de numérotation, juste la description sur chaque ligne.\n\n${lines.join('\n')}\n\nRéponds avec une description par ligne, rien d'autre :`;
+      const descResult = await generateWithLLM(descPrompt);
+      const descriptions = descResult.trim().split('\n').map(l => l.replace(/^\d+[\.\)]\s*/, '').trim()).filter(l => l.length > 3);
+
+      res.json({ descriptions });
+    } catch (err) {
+      console.error('[report] Description regeneration failed:', err);
+      res.json({ descriptions: [] });
+    }
+  });
+
   // List dates with available tracking data (for report page)
   router.get('/', async (req, res) => {
     const dates = await storage.listTrackingDates();

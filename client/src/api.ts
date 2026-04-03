@@ -138,6 +138,12 @@ export const unvalidateReport = (date: string) =>
     method: 'POST',
   });
 
+export const regenerateDescriptions = (date: string, entries: { activityId: string; totalMinutes: number }[]) =>
+  json<{ descriptions: string[] }>(`/report/${date}/descriptions`, {
+    method: 'POST',
+    body: JSON.stringify({ entries }),
+  });
+
 // Deferred
 export const getDeferred = () =>
   json<{ date: string; entry: TimesheetEntry }[]>('/deferred');

@@ -3,7 +3,7 @@ import type { TrackingReport, SuggestedEntry, AudioSegment } from '../types';
 import * as api from '../api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ChevronLeft, FileText, Check, Clock, AlertCircle, Mic, ChevronDown, Terminal, Monitor } from 'lucide-react';
+import { ChevronLeft, FileText, Check, Clock, AlertCircle, Mic, ChevronDown, Terminal, Monitor, Sparkles } from 'lucide-react';
 
 function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -172,6 +172,40 @@ export default function ReportPage() {
 
   function updateEntry(index: number, updates: Partial<SuggestedEntry & { selected: boolean }>) {
     setEditEntries(prev => prev.map((e, i) => i === index ? { ...e, ...updates } : e));
+  }
+
+  const [regeneratingDescs, setRegeneratingDescs] = useState(false);
+
+  async function handleRegenerateDescriptions() {
+    if (!selectedDate) return;
+    setRegeneratingDescs(true);
+    try {
+      // Collect all entries: suggested + assigned unmatched
+      const allEntries = [
+        ...editEntries.filter(e => e.selected).map(e => ({ activityId: e.activityId, totalMinutes: e.totalMinutes })),
+        ...editUnmatched.filter(e => e.selected && e.activityId).map(e => ({ activityId: e.activityId, totalMinutes: e.totalMinutes })),
+      ];
+      if (allEntries.length === 0) return;
+      const result = await api.regenerateDescriptions(selectedDate, allEntries);
+      if (result.descriptions.length > 0) {
+        // Apply descriptions to suggested entries first, then unmatched
+        let di = 0;
+        setEditEntries(prev => prev.map(e => {
+          if (e.selected && di < result.descriptions.length) {
+            return { ...e, description: result.descriptions[di++] };
+          }
+          return e;
+        }));
+        setEditUnmatched(prev => prev.map(e => {
+          if (e.selected && e.activityId && di < result.descriptions.length) {
+            return { ...e, description: result.descriptions[di++] };
+          }
+          return e;
+        }));
+      }
+    } catch { /* ignore */ } finally {
+      setRegeneratingDescs(false);
+    }
   }
 
   // --- List view ---
@@ -493,9 +527,22 @@ export default function ReportPage() {
             </section>
           )}
 
-          {/* Validate button */}
+          {/* Action buttons */}
           {report.status !== 'validated' && (editEntries.some(e => e.selected) || editUnmatched.some(e => e.selected && e.activityId)) && (
-            <div className="text-center pt-2">
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <Button variant="outline" onClick={handleRegenerateDescriptions} disabled={regeneratingDescs}>
+                {regeneratingDescs ? (
+                  <>
+                    <div className="h-3.5 w-3.5 rounded-full border-2 border-muted animate-spin border-t-foreground" />
+                    Descriptions...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    Recalculer descriptions
+                  </>
+                )}
+              </Button>
               <Button size="lg" onClick={handleValidate} disabled={validating} className="text-base font-semibold px-8">
                 <Check className="h-5 w-5" />
                 Tout valider ({editEntries.filter(e => e.selected).length + editUnmatched.filter(e => e.selected && e.activityId).length} entrée(s))
