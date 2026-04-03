@@ -21,7 +21,7 @@ export async function checkOllama(): Promise<OllamaStatus> {
 
 // Chat-based LLM call (Qwen 3.5 requires /api/chat, not /api/generate)
 // think: false for fast plain-text responses (descriptions)
-export async function generateWithLLM(prompt: string, model = 'qwen3.5:9b'): Promise<string> {
+export async function generateWithLLM(prompt: string, model = 'qwen3.5:9b-q8_0'): Promise<string> {
   const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -68,7 +68,7 @@ export interface LLMSuggestedEntry {
 }
 
 // JSON analysis call: think: true + format schema (required for reliable JSON with Qwen 3.5)
-export async function analyzeReport(input: LLMReportInput, model = 'qwen3.5:9b'): Promise<{
+export async function analyzeReport(input: LLMReportInput, model = 'qwen3.5:9b-q8_0'): Promise<{
   summary: string;
   suggestions: LLMSuggestedEntry[];
 }> {
