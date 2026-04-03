@@ -21,7 +21,7 @@ export async function checkOllama(): Promise<OllamaStatus> {
 }
 
 // Low-level chat call — all LLM interactions go through here
-async function chat(system: string, user: string, options?: { temperature?: number; num_predict?: number }): Promise<string> {
+async function chat(system: string, user: string, options?: { temperature?: number; num_predict?: number; unload?: boolean }): Promise<string> {
   const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -33,6 +33,7 @@ async function chat(system: string, user: string, options?: { temperature?: numb
       ],
       think: false,
       stream: false,
+      ...(options?.unload ? { keep_alive: 0 } : {}),
       options: {
         num_ctx: 8192,
         num_predict: options?.num_predict ?? 2048,
@@ -190,7 +191,7 @@ export async function generateDescriptions(input: {
 Une description par ligne, pas de numérotation.
 NE COPIE PAS les titres de fenêtres ou noms de fichiers. Décris l'activité métier.${styleSection}`,
     lines.join('\n'),
-    { temperature: 0.6 },
+    { temperature: 0.6, unload: true },
   );
 
   return result.trim().split('\n')
@@ -204,6 +205,6 @@ export async function generateWithLLM(prompt: string): Promise<string> {
   return chat(
     'Tu es un assistant concis qui répond directement sans explication superflue.',
     prompt,
-    { temperature: 0.6 },
+    { temperature: 0.6, unload: true },
   );
 }
