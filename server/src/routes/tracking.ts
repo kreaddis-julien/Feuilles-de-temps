@@ -108,12 +108,16 @@ export function createTrackingRouter(storage: Storage) {
     }
 
     if (!data.claudePrompts) (data as any).claudePrompts = [];
+    const { gitBranch, gitLastCommit, gitDirtyFiles } = req.body;
     (data as any).claudePrompts.push({
       timestamp: timestamp || new Date().toISOString(),
       cwd: cwd || '',
       prompt: prompt.trim(),
       sessionId: sessionId || '',
       project: cwd ? cwd.split('/').pop() : '',
+      gitBranch: gitBranch || '',
+      gitLastCommit: gitLastCommit || '',
+      gitDirtyFiles: gitDirtyFiles || 0,
     });
 
     await storage.saveTracking(data);

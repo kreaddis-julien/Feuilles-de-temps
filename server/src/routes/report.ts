@@ -210,6 +210,8 @@ export function createReportRouter(storage: Storage) {
             time: c.timestamp?.slice(11, 16) || '',
             project: c.project || '',
             prompt: c.prompt || '',
+            gitBranch: c.gitBranch || '',
+            gitLastCommit: c.gitLastCommit || '',
           })),
           projectMappings,
         });

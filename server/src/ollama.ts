@@ -70,24 +70,30 @@ export interface DevContext {
 }
 
 export async function summarizeDevWork(input: {
-  claudePrompts: { time: string; project: string; prompt: string }[];
+  claudePrompts: { time: string; project: string; prompt: string; gitBranch?: string; gitLastCommit?: string }[];
   projectMappings: { project: string; activityId: string; label: string }[];
 }): Promise<DevContext> {
   if (!input.claudePrompts.length) return { projectSummaries: [] };
 
   // Group prompts by project, filter noise
-  const byProject: Record<string, string[]> = {};
+  const byProject: Record<string, { prompts: string[]; branches: Set<string>; commits: Set<string> }> = {};
   for (const p of input.claudePrompts) {
     if (!p.project || p.prompt.length < 15) continue;
     if (/^(ok|oui|non|je|on |c'est|&)/i.test(p.prompt.trim())) continue;
-    if (!byProject[p.project]) byProject[p.project] = [];
-    byProject[p.project].push(`[${p.time}] ${p.prompt.slice(0, 100)}`);
+    if (!byProject[p.project]) byProject[p.project] = { prompts: [], branches: new Set(), commits: new Set() };
+    byProject[p.project].prompts.push(`[${p.time}] ${p.prompt.slice(0, 100)}`);
+    if (p.gitBranch) byProject[p.project].branches.add(p.gitBranch);
+    if (p.gitLastCommit) byProject[p.project].commits.add(p.gitLastCommit);
   }
 
-  const projectLines = Object.entries(byProject).map(([proj, prompts]) => {
+  const projectLines = Object.entries(byProject).map(([proj, data]) => {
     const mapping = input.projectMappings.find(m => m.project === proj);
     const label = mapping ? mapping.label : proj;
-    return `Projet "${proj}" (${label}) :\n${prompts.slice(0, 10).map(p => `  ${p}`).join('\n')}`;
+    const gitInfo = [
+      data.branches.size ? `Branches: ${[...data.branches].join(', ')}` : '',
+      data.commits.size ? `Commits: ${[...data.commits].slice(0, 5).join('; ')}` : '',
+    ].filter(Boolean).join('\n  ');
+    return `Projet "${proj}" (${label}) :\n${gitInfo ? `  ${gitInfo}\n` : ''}${data.prompts.slice(0, 10).map(p => `  ${p}`).join('\n')}`;
   }).join('\n\n');
 
   if (!projectLines) return { projectSummaries: [] };

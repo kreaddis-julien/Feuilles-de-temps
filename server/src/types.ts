@@ -74,6 +74,9 @@ export interface ClaudePrompt {
   prompt: string;
   sessionId: string;
   project: string;
+  gitBranch?: string;
+  gitLastCommit?: string;
+  gitDirtyFiles?: number;
 }
 
 export interface TrackingDay {
