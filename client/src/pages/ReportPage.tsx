@@ -276,6 +276,16 @@ export default function ReportPage() {
             </CardContent>
           </Card>
 
+          {report.gaps && report.gaps.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {report.gaps.map((g, i) => (
+                <span key={i} className="text-xs bg-muted px-2 py-1 rounded-full text-muted-foreground">
+                  Pause {new Date(g.from).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})} → {new Date(g.to).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})} ({g.durationMinutes}min)
+                </span>
+              ))}
+            </div>
+          )}
+
           {/* Suggested entries */}
           {editEntries.length > 0 && (
             <section className="space-y-3">
@@ -292,7 +302,16 @@ export default function ReportPage() {
                             onChange={e => updateEntry(i, { selected: e.target.checked })}
                             className="h-4 w-4 rounded accent-primary cursor-pointer"
                           />
-                          <span className="font-medium text-sm">{activityLabel(entry.activityId)}</span>
+                          <div className="flex items-center gap-2">
+                            <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${
+                              entry.confidence === 'high' ? 'bg-green-500' :
+                              entry.confidence === 'medium' ? 'bg-yellow-500' : 'bg-red-400'
+                            }`} title={`Confiance ${entry.confidence} — source: ${entry.source}`} />
+                            {entry.source && entry.source !== 'cmux' && (
+                              <span className="text-[10px] text-muted-foreground">{entry.source}</span>
+                            )}
+                            <span className="font-medium text-sm">{activityLabel(entry.activityId)}</span>
+                          </div>
                         </div>
                         <span className="font-mono text-sm font-semibold tabular-nums">{formatDuration(entry.roundedMinutes)}</span>
                       </div>
