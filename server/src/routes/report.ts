@@ -35,12 +35,90 @@ export function createReportRouter(storage: Storage) {
       return { id: a.id, name: a.name, customerName: c?.name ?? '' };
     });
 
+    // Pre-match blocks using project mapping (crochets → activityId)
+    const config = await storage.loadTrackingConfig() as any;
+    const projectMap: Record<string, { activityId: string }> = config.projectMap || {};
+
+    const preMatched: SuggestedEntry[] = [];
+    const preUnmatched: typeof blocks = [];
+
+    // Group blocks by matched activityId from project mapping
+    const byMappedActivity = new Map<string, { totalSecs: number; titles: Set<string>; customerName?: string }>();
+
+    for (const b of blocks) {
+      // Extract project from brackets [project]
+      const bracketMatch = b.title.match(/\[([^\]]+)\]/);
+      const project = bracketMatch ? bracketMatch[1].trim() : null;
+      const mapping = project ? projectMap[project] : null;
+
+      if (mapping) {
+        const act = activitiesWithCustomer.find(a => a.id === mapping.activityId);
+        const existing = byMappedActivity.get(mapping.activityId) || { totalSecs: 0, titles: new Set(), customerName: act?.customerName };
+        existing.totalSecs += b.totalSeconds;
+        const cleanTitle = b.title.replace(/\s*\[[^\]]*\]\s*/g, '').replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁]\s*/, '').trim();
+        if (cleanTitle && cleanTitle.length > 3) existing.titles.add(cleanTitle);
+        byMappedActivity.set(mapping.activityId, existing);
+      } else {
+        // Also try matching by domain/title to customer name (for Chrome etc.)
+        const match = tryMatch(b, activities.activities, customers.customers);
+        if (match.activityId) {
+          const existing = byMappedActivity.get(match.activityId) || { totalSecs: 0, titles: new Set(), customerName: match.customerName };
+          existing.totalSecs += b.totalSeconds;
+          const cleanTitle = b.title.replace(/\s*\[[^\]]*\]\s*/g, '').replace(/^[⠀-⣿✳⠐⠂⠈⠠⠄⠁]\s*/, '').trim();
+          if (cleanTitle && cleanTitle.length > 3) existing.titles.add(cleanTitle);
+          byMappedActivity.set(match.activityId, existing);
+        } else {
+          preUnmatched.push(b);
+        }
+      }
+    }
+
+    // Build descriptions from Claude prompts when available, fall back to titles
+    const claudePromptsByProject: Record<string, string[]> = {};
+    for (const p of (tracking.claudePrompts || []) as any[]) {
+      if (p.project && p.prompt && p.prompt.length > 10) {
+        if (!claudePromptsByProject[p.project]) claudePromptsByProject[p.project] = [];
+        claudePromptsByProject[p.project].push(p.prompt);
+      }
+    }
+
+    for (const [activityId, data] of byMappedActivity) {
+      const totalMinutes = Math.round(data.totalSecs / 60);
+      if (totalMinutes < 2) continue;
+
+      // Find matching project name from mapping
+      let description = [...data.titles].slice(0, 3).join(', ');
+      for (const [project, mapping] of Object.entries(projectMap)) {
+        if ((mapping as any).activityId === activityId && claudePromptsByProject[project]) {
+          // Use first few meaningful prompts as description
+          const meaningfulPrompts = claudePromptsByProject[project]
+            .filter(p => p.length > 15 && !p.startsWith('ok') && !p.startsWith('oui') && !p.startsWith('non'))
+            .slice(0, 3)
+            .map(p => p.slice(0, 60));
+          if (meaningfulPrompts.length > 0) {
+            description = meaningfulPrompts.join(' / ');
+          }
+          break;
+        }
+      }
+
+      preMatched.push({
+        activityId,
+        customerName: data.customerName,
+        description,
+        totalMinutes,
+        roundedMinutes: Math.max(15, Math.ceil(totalMinutes / 15) * 15),
+        confidence: 0.9,
+        blockCount: 1,
+      });
+    }
+
     let summary = '';
-    let suggestedEntries: SuggestedEntry[] = [];
-    let unmatched: typeof blocks = [];
+    let suggestedEntries: SuggestedEntry[] = [...preMatched];
+    let unmatched: typeof blocks = [...preUnmatched];
     let aiEnhanced = false;
 
-    // Try LLM-first approach
+    // Try LLM to enhance descriptions and match remaining unmatched blocks
     const ollama = await checkOllama();
     const hasLLM = ollama.available && ollama.models.some(m => m.startsWith('qwen') || m.startsWith('llama') || m.startsWith('mistral'));
 
@@ -68,11 +146,25 @@ export function createReportRouter(storage: Storage) {
           }
         }
 
+        // Load project mappings so the LLM knows which directories map to which clients
+        const config = await storage.loadTrackingConfig() as any;
+        const projectMap = config.projectMap || {};
+        const projectMappings: { project: string; activityId: string; label: string }[] = [];
+        for (const [project, mapping] of Object.entries(projectMap)) {
+          const act = activitiesWithCustomer.find(a => a.id === (mapping as any).activityId);
+          if (act) {
+            projectMappings.push({ project, activityId: act.id, label: `${act.customerName} - ${act.name}` });
+          }
+        }
+
         // Send ALL blocks to LLM (no pre-matching)
         const llmResult = await analyzeReport({
           date: req.params.date,
-          blocks: [], // No pre-matched blocks
-          unmatched: blocks.map(b => ({ app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes })),
+          blocks: suggestedEntries.map(e => {
+            const act = activitiesWithCustomer.find(a => a.id === e.activityId);
+            return { app: act ? `${act.customerName} - ${act.name}` : '', title: e.description, totalMinutes: e.totalMinutes, activityId: e.activityId };
+          }),
+          unmatched: unmatched.filter(b => b.totalMinutes >= 1).map(b => ({ app: b.app, title: b.title, domain: b.domain, totalMinutes: b.totalMinutes })),
           audioTranscripts,
           claudePrompts: (tracking.claudePrompts || []).map((c: any) => ({
             time: c.timestamp?.slice(11, 16) || '',
@@ -80,69 +172,34 @@ export function createReportRouter(storage: Storage) {
             prompt: c.prompt || '',
           })),
           activities: activitiesWithCustomer,
+          projectMappings,
           recentTimesheets: recentExamples.slice(-20),
         });
 
         summary = llmResult.summary;
         aiEnhanced = true;
 
-        // Build suggested entries from LLM suggestions (only valid activityIds)
+        // Merge LLM suggestions into suggested entries (only valid activityIds)
         const validActivityIds = new Set(activities.activities.map(a => a.id));
-        const byActivity = new Map<string, { totalMin: number; description: string; customerName?: string }>();
-
         for (const s of llmResult.suggestions) {
           if (s.activityId && validActivityIds.has(s.activityId)) {
-            const existing = byActivity.get(s.activityId);
+            const existing = suggestedEntries.find(e => e.activityId === s.activityId);
             if (existing) {
-              existing.totalMin += s.totalMinutes;
-              if (s.description && !existing.description.includes(s.description)) {
-                existing.description += ', ' + s.description;
+              // LLM might provide better description
+              if (s.description && s.description.length > 5) {
+                existing.description = s.description;
               }
             } else {
               const act = activitiesWithCustomer.find(a => a.id === s.activityId);
-              byActivity.set(s.activityId, {
-                totalMin: s.totalMinutes,
-                description: s.description,
+              suggestedEntries.push({
+                activityId: s.activityId,
                 customerName: act?.customerName,
+                description: s.description,
+                totalMinutes: s.totalMinutes,
+                roundedMinutes: Math.max(15, Math.ceil(s.totalMinutes / 15) * 15),
+                confidence: 0.7,
+                blockCount: 1,
               });
-            }
-          }
-        }
-
-        for (const [activityId, data] of byActivity) {
-          const roundedMinutes = Math.max(15, Math.ceil(data.totalMin / 15) * 15);
-          suggestedEntries.push({
-            activityId,
-            customerName: data.customerName,
-            description: data.description,
-            totalMinutes: data.totalMin,
-            roundedMinutes,
-            confidence: 0.8,
-            blockCount: 1,
-          });
-        }
-
-        // Unmatched = blocks not covered by LLM suggestions
-        const matchedMinutes = suggestedEntries.reduce((s, e) => s + e.totalMinutes, 0);
-        if (matchedMinutes < totalTrackedMinutes) {
-          // Find blocks that weren't matched by the LLM
-          const suggestedApps = new Set(llmResult.suggestions.map(s => s.description?.toLowerCase()));
-          for (const b of blocks) {
-            const isMatched = llmResult.suggestions.some(s =>
-              s.activityId && validActivityIds.has(s.activityId) &&
-              (b.title.toLowerCase().includes(s.description?.toLowerCase() || '___') ||
-               s.description?.toLowerCase().includes(b.app.toLowerCase()))
-            );
-            if (!isMatched && b.totalMinutes >= 1) {
-              // Check if it's already covered by a matched entry (by app/domain)
-              const coveredByMatch = suggestedEntries.some(e => {
-                const act = activitiesWithCustomer.find(a => a.id === e.activityId);
-                return act && (b.title.toLowerCase().includes(act.customerName.toLowerCase()) ||
-                               (b.domain && b.domain.includes(act.customerName.toLowerCase())));
-              });
-              if (!coveredByMatch) {
-                unmatched.push(b);
-              }
             }
           }
         }
@@ -211,12 +268,15 @@ export function createReportRouter(storage: Storage) {
 
     const { entries } = req.body; // Array of { activityId, description, roundedMinutes }
 
-    // Create timesheet entries
+    // Create timesheet entries and track their IDs
     const timesheet = await storage.loadTimesheet(req.params.date);
     const now = new Date().toISOString();
+    const createdIds: string[] = [];
     for (const entry of entries) {
+      const id = uuid();
+      createdIds.push(id);
       timesheet.entries.push({
-        id: uuid(),
+        id,
         activityId: entry.activityId || '',
         description: entry.description || '',
         segments: [{ start: now, end: now }],
@@ -227,11 +287,38 @@ export function createReportRouter(storage: Storage) {
     }
     await storage.saveTimesheet(timesheet);
 
-    // Mark report as validated
+    // Mark report as validated and store created entry IDs for undo
     tracking.report.status = 'validated';
+    (tracking.report as any).validatedEntryIds = createdIds;
     await storage.saveTracking(tracking);
 
     res.json({ ok: true, entriesCreated: entries.length });
+  });
+
+  // Undo validation: remove created timesheet entries and reset report status
+  router.post('/:date/unvalidate', async (req, res) => {
+    const tracking = await storage.loadTracking(req.params.date);
+    if (!tracking.report || tracking.report.status !== 'validated') {
+      return res.status(404).json({ error: 'No validated report for this date' });
+    }
+
+    const entryIds: string[] = (tracking.report as any).validatedEntryIds || [];
+
+    if (entryIds.length > 0) {
+      const timesheet = await storage.loadTimesheet(req.params.date);
+      const idsToRemove = new Set(entryIds);
+      timesheet.entries = timesheet.entries.filter(e => !idsToRemove.has(e.id));
+      timesheet.activeEntries = timesheet.activeEntries.filter(id => !idsToRemove.has(id));
+      timesheet.pausedEntries = timesheet.pausedEntries.filter(id => !idsToRemove.has(id));
+      await storage.saveTimesheet(timesheet);
+    }
+
+    // Reset report to pending
+    tracking.report.status = 'pending';
+    delete (tracking.report as any).validatedEntryIds;
+    await storage.saveTracking(tracking);
+
+    res.json({ ok: true, entriesRemoved: entryIds.length });
   });
 
   return router;

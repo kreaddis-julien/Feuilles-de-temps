@@ -3,7 +3,7 @@ import type { TrackingReport, SuggestedEntry, AudioSegment } from '../types';
 import * as api from '../api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ChevronLeft, FileText, Check, Clock, AlertCircle, Mic, ChevronDown, Terminal } from 'lucide-react';
+import { ChevronLeft, FileText, Check, Clock, AlertCircle, Mic, ChevronDown, Terminal, Monitor } from 'lucide-react';
 
 function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -34,6 +34,8 @@ export default function ReportPage() {
   const [showAudio, setShowAudio] = useState(false);
   const [claudePrompts, setClaudePrompts] = useState<{ timestamp: string; project: string; prompt: string }[]>([]);
   const [showClaude, setShowClaude] = useState(false);
+  const [screenSessions, setScreenSessions] = useState<{ from: string; until: string; app: string; title: string; url?: string }[]>([]);
+  const [showSessions, setShowSessions] = useState(false);
   // Editable unmatched blocks
   const [editUnmatched, setEditUnmatched] = useState<{ app: string; title: string; totalMinutes: number; activityId: string; description: string; selected: boolean }[]>([]);
 
@@ -74,6 +76,7 @@ export default function ReportPage() {
       const tracking = await api.getTracking(date);
       setAudioSegments(tracking.audioSegments.filter(s => s.hasSpeech));
       setClaudePrompts((tracking as any).claudePrompts || []);
+      setScreenSessions(tracking.screenSessions || []);
     } catch {
       setReport(null);
     } finally {
@@ -89,6 +92,7 @@ export default function ReportPage() {
         const tracking = await api.getTracking(selectedDate);
         setAudioSegments(tracking.audioSegments.filter(s => s.hasSpeech));
         setClaudePrompts((tracking as any).claudePrompts || []);
+      setScreenSessions(tracking.screenSessions || []);
       } catch { /* ignore */ }
     };
     const id = setInterval(refreshTracking, 5000);
@@ -154,6 +158,18 @@ export default function ReportPage() {
     }
   }
 
+  async function handleUnvalidate() {
+    if (!selectedDate || !report) return;
+    setValidating(true);
+    try {
+      await api.unvalidateReport(selectedDate);
+      setReport({ ...report, status: 'pending' });
+      await refreshDates();
+    } finally {
+      setValidating(false);
+    }
+  }
+
   function updateEntry(index: number, updates: Partial<SuggestedEntry & { selected: boolean }>) {
     setEditEntries(prev => prev.map((e, i) => i === index ? { ...e, ...updates } : e));
   }
@@ -206,7 +222,12 @@ export default function ReportPage() {
         </Button>
         <h1 className="text-2xl font-bold">Rapport — {formatDateFR(selectedDate)}</h1>
         {report?.status === 'validated' && (
-          <span className="text-xs font-medium text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full">Validé</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full">Validé</span>
+            <Button variant="outline" size="sm" className="h-7 text-xs text-destructive" onClick={handleUnvalidate} disabled={validating}>
+              Annuler
+            </Button>
+          </div>
         )}
         <Button variant="outline" size="sm" onClick={regenerateReport} disabled={loading}>
           {loading ? (
@@ -218,7 +239,7 @@ export default function ReportPage() {
         </Button>
       </div>
 
-      {loading ? (
+      {loading && !report ? (
         <div className="flex flex-col items-center gap-4 py-16">
           <div className="relative">
             <div className="h-10 w-10 rounded-full border-4 border-muted animate-spin border-t-primary" />
@@ -372,6 +393,35 @@ export default function ReportPage() {
                   </Card>
                 ))}
               </div>
+            </section>
+          )}
+
+          {/* Screen sessions */}
+          {screenSessions.length > 0 && (
+            <section className="space-y-3">
+              <button
+                onClick={() => setShowSessions(v => !v)}
+                className="flex items-center gap-2 text-lg font-semibold hover:text-primary transition-colors"
+              >
+                <Monitor className="h-4 w-4" />
+                Sessions écran ({screenSessions.length})
+                <ChevronDown className={`h-4 w-4 transition-transform ${showSessions ? 'rotate-180' : ''}`} />
+              </button>
+              {showSessions && (
+                <div className="space-y-1 max-h-64 overflow-y-auto">
+                  {screenSessions.map((s, i) => {
+                    const from = new Date(s.from).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                    const until = new Date(s.until).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                    return (
+                      <div key={i} className="flex gap-3 text-sm px-3 py-1.5 rounded-lg bg-muted/50">
+                        <span className="text-muted-foreground shrink-0 tabular-nums">{from}→{until}</span>
+                        <span className="text-xs text-primary font-medium shrink-0">{s.app}</span>
+                        <span className="truncate text-muted-foreground">{s.title || '(sans titre)'}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
           )}
 

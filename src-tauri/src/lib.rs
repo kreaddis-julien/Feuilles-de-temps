@@ -164,7 +164,7 @@ fn spawn_mic_tracker(_app_handle: tauri::AppHandle) {
     });
 }
 
-/// Spawn a thread that polls the frontmost app every 10 seconds and sends data to the server.
+/// Spawn a thread that polls the frontmost app every 5 seconds and sends data to the server.
 fn spawn_screen_tracker(_app_handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         let client = reqwest::blocking::Client::new();
@@ -177,7 +177,7 @@ fn spawn_screen_tracker(_app_handle: tauri::AppHandle) {
         let mut project_cache_tick: u32 = 0;
 
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(10));
+            std::thread::sleep(std::time::Duration::from_secs(5));
 
             // Check if screen tracking is enabled
             let config_ok = client
@@ -301,9 +301,9 @@ return frontApp & "||" & frontAppId & "||" & winTitle
             // For terminal apps (cmux, Terminal, iTerm), enrich title with the active project directory
             let terminal_bundles = ["com.cmuxterm.app", "com.apple.Terminal", "com.googlecode.iterm2"];
             if terminal_bundles.contains(&bundle_id.as_str()) && url.is_empty() {
-                // Refresh tty-to-project mapping every 30s (3 ticks × 10s) to avoid expensive lsof calls
+                // Refresh tty-to-project mapping every 30s (6 ticks × 5s) to avoid expensive lsof calls
                 project_cache_tick += 1;
-                if project_cache_tick >= 3 || cached_project_mapping.is_empty() {
+                if project_cache_tick >= 6 || cached_project_mapping.is_empty() {
                     project_cache_tick = 0;
                     cached_project_mapping = std::process::Command::new("bash")
                         .arg("-c")
@@ -333,15 +333,8 @@ return frontApp & "||" & frontAppId & "||" & winTitle
                     }
                 }
 
-                // If no specific match, list all projects as fallback
-                if best_project.is_empty() {
-                    let all_projects: Vec<&str> = mapping.lines()
-                        .filter_map(|l| l.splitn(2, ' ').nth(1))
-                        .collect();
-                    if !all_projects.is_empty() {
-                        best_project = all_projects.join(",");
-                    }
-                }
+                // If no specific match, don't add brackets — avoids false matches
+                // The LLM can still infer from the tab name itself
 
                 if !best_project.is_empty() {
                     title = if clean_title.is_empty() {
