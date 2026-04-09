@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import type { CustomersData, ActivitiesData, TimesheetDay, TrackingDay, TrackingConfig } from './types.js';
+import type { CustomersData, ActivitiesData, TimesheetDay, TrackingDay, TrackingConfig, StyleProfile } from './types.js';
 
 export class Storage {
   private writeLocks = new Map<string, Promise<void>>();
@@ -198,6 +198,20 @@ export class Storage {
   async saveTrackingConfig(config: TrackingConfig): Promise<void> {
     const filePath = path.join(this.dataDir, 'tracking-config.json');
     await this.atomicWrite(filePath, JSON.stringify(config, null, 2));
+  }
+
+  async loadStyleProfile(): Promise<StyleProfile> {
+    const filePath = path.join(this.dataDir, 'style-profile.json');
+    try {
+      return JSON.parse(await fs.readFile(filePath, 'utf-8')) as StyleProfile;
+    } catch {
+      return { descriptionsByActivity: {}, corrections: [], updatedAt: '' };
+    }
+  }
+
+  async saveStyleProfile(profile: StyleProfile): Promise<void> {
+    const filePath = path.join(this.dataDir, 'style-profile.json');
+    await this.atomicWrite(filePath, JSON.stringify(profile, null, 2));
   }
 
   async withTimesheet(date: string, fn: (data: TimesheetDay) => void | Promise<void>): Promise<TimesheetDay> {

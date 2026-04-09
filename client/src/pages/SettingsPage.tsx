@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { Monitor, Mic, Search, X, Plus, Trash2, ChevronLeft } from 'lucide-react';
+import { Monitor, Search, X, Plus, Trash2, ChevronLeft } from 'lucide-react';
 
 export default function SettingsPage() {
   const [activities, setActivities] = useState<ActivitiesData>({ activities: [] });
@@ -64,10 +64,6 @@ export default function SettingsPage() {
     setTrackingConfig(updated);
   }
 
-  async function toggleMic() {
-    const updated = await api.updateTrackingConfig({ micEnabled: !trackingConfig.micEnabled });
-    setTrackingConfig(updated);
-  }
 
   // --- Customers ---
   const handleCreateCustomer = async () => {
@@ -184,27 +180,6 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
 
-            <Card className="py-4 gap-0">
-              <CardContent className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Mic className="h-5 w-5 text-muted-foreground" />
-                  <div>
-                    <p className="text-sm font-medium">Tracking micro</p>
-                    <p className="text-xs text-muted-foreground">Transcription via Whisper</p>
-                  </div>
-                </div>
-                <button
-                  onClick={toggleMic}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    trackingConfig.micEnabled ? 'bg-primary' : 'bg-muted'
-                  }`}
-                >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    trackingConfig.micEnabled ? 'translate-x-6' : 'translate-x-1'
-                  }`} />
-                </button>
-              </CardContent>
-            </Card>
           </div>
 
           <div className="space-y-2 text-sm">

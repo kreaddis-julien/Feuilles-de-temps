@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { TrackingReport, SuggestedEntry, AudioSegment } from '../types';
+import type { TrackingReport, SuggestedEntry } from '../types';
 import * as api from '../api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ChevronLeft, FileText, Check, Clock, AlertCircle, Mic, ChevronDown, Terminal, Monitor } from 'lucide-react';
+import { ChevronLeft, FileText, Check, Clock, AlertCircle, ChevronDown, Terminal, Monitor, Sparkles } from 'lucide-react';
 
 function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -25,13 +25,12 @@ export default function ReportPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [report, setReport] = useState<TrackingReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<{ step: number; total: number; label: string } | null>(null);
   const [validating, setValidating] = useState(false);
   // Editable suggested entries
   const [editEntries, setEditEntries] = useState<(SuggestedEntry & { selected: boolean })[]>([]);
   const [activities, setActivities] = useState<{ id: string; name: string; customerId: string }[]>([]);
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
-  const [audioSegments, setAudioSegments] = useState<AudioSegment[]>([]);
-  const [showAudio, setShowAudio] = useState(false);
   const [claudePrompts, setClaudePrompts] = useState<{ timestamp: string; project: string; prompt: string }[]>([]);
   const [showClaude, setShowClaude] = useState(false);
   const [screenSessions, setScreenSessions] = useState<{ from: string; until: string; app: string; title: string; url?: string }[]>([]);
@@ -53,34 +52,39 @@ export default function ReportPage() {
     api.getCustomers().then(c => setCustomers(c.customers));
   }, []);
 
+  function applyReport(r: TrackingReport) {
+    setReport(r);
+    setEditEntries(r.suggestedEntries.map(e => ({ ...e, selected: true })));
+    setEditUnmatched(r.unmatched.map(b => ({
+      app: b.app,
+      title: b.title,
+      totalMinutes: b.totalMinutes,
+      activityId: '',
+      description: `${b.app}: ${b.title}`,
+      selected: false,
+    })));
+  }
+
   async function selectDate(date: string) {
     setSelectedDate(date);
     setLoading(true);
-    setShowAudio(false);
+    setProgress(null);
     try {
       let r = await api.getReport(date);
       if (!r) {
-        r = await api.generateReport(date);
+        r = await api.generateReportSSE(date, (step, total, label) => {
+          setProgress({ step, total, label });
+        });
       }
-      setReport(r);
-      setEditEntries(r.suggestedEntries.map(e => ({ ...e, selected: true })));
-      setEditUnmatched(r.unmatched.map(b => ({
-        app: b.app,
-        title: b.title,
-        totalMinutes: b.totalMinutes,
-        activityId: '',
-        description: `${b.app}: ${b.title}`,
-        selected: false,
-      })));
-      // Load audio segments
+      applyReport(r);
       const tracking = await api.getTracking(date);
-      setAudioSegments(tracking.audioSegments.filter(s => s.hasSpeech));
       setClaudePrompts((tracking as any).claudePrompts || []);
       setScreenSessions(tracking.screenSessions || []);
     } catch {
       setReport(null);
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   }
 
@@ -90,8 +94,7 @@ export default function ReportPage() {
     const refreshTracking = async () => {
       try {
         const tracking = await api.getTracking(selectedDate);
-        setAudioSegments(tracking.audioSegments.filter(s => s.hasSpeech));
-        setClaudePrompts((tracking as any).claudePrompts || []);
+          setClaudePrompts((tracking as any).claudePrompts || []);
       setScreenSessions(tracking.screenSessions || []);
       } catch { /* ignore */ }
     };
@@ -102,22 +105,17 @@ export default function ReportPage() {
   async function regenerateReport() {
     if (!selectedDate) return;
     setLoading(true);
+    setProgress(null);
     try {
-      const r = await api.generateReport(selectedDate);
-      setReport(r);
-      setEditEntries(r.suggestedEntries.map(e => ({ ...e, selected: true })));
-      setEditUnmatched(r.unmatched.map(b => ({
-        app: b.app,
-        title: b.title,
-        totalMinutes: b.totalMinutes,
-        activityId: '',
-        description: `${b.app}: ${b.title}`,
-        selected: false,
-      })));
+      const r = await api.generateReportSSE(selectedDate, (step, total, label) => {
+        setProgress({ step, total, label });
+      });
+      applyReport(r);
     } catch {
       setReport(null);
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   }
 
@@ -172,6 +170,58 @@ export default function ReportPage() {
 
   function updateEntry(index: number, updates: Partial<SuggestedEntry & { selected: boolean }>) {
     setEditEntries(prev => prev.map((e, i) => i === index ? { ...e, ...updates } : e));
+  }
+
+  const [regeneratingDescs, setRegeneratingDescs] = useState(false);
+
+  async function handleRecalculate() {
+    if (!selectedDate) return;
+    setRegeneratingDescs(true);
+    try {
+      // Collect all entries: suggested + assigned unmatched
+      const allEntries = [
+        ...editEntries.filter(e => e.selected).map(e => ({ activityId: e.activityId, totalMinutes: e.totalMinutes })),
+        ...editUnmatched.filter(e => e.selected && e.activityId).map(e => ({ activityId: e.activityId, totalMinutes: e.totalMinutes })),
+      ];
+      if (allEntries.length === 0) return;
+
+      // Merge entries with same activityId
+      const merged = new Map<string, number>();
+      for (const e of allEntries) {
+        merged.set(e.activityId, (merged.get(e.activityId) || 0) + e.totalMinutes);
+      }
+
+      const mergedEntries = [...merged.entries()].map(([activityId, totalMinutes]) => ({
+        activityId,
+        totalMinutes,
+      }));
+
+      // Regenerate descriptions for merged entries
+      const result = await api.regenerateDescriptions(selectedDate, mergedEntries);
+
+      // Build new suggested entries from merged results
+      const newEntries = mergedEntries.map((e, i) => {
+        const act = activities.find(a => a.id === e.activityId);
+        const customer = act ? customers.find(c => c.id === act.customerId) : null;
+        return {
+          activityId: e.activityId,
+          customerName: customer?.name,
+          description: result.descriptions[i] || '',
+          totalMinutes: e.totalMinutes,
+          roundedMinutes: Math.max(15, Math.ceil(e.totalMinutes / 15) * 15),
+          confidence: 'high' as const,
+          source: 'cmux' as const,
+          blockCount: 1,
+          selected: true,
+        };
+      }).sort((a, b) => b.totalMinutes - a.totalMinutes);
+
+      setEditEntries(newEntries);
+      // Remove assigned unmatched (they're now merged into suggested)
+      setEditUnmatched(prev => prev.filter(e => !e.selected || !e.activityId));
+    } catch { /* ignore */ } finally {
+      setRegeneratingDescs(false);
+    }
   }
 
   // --- List view ---
@@ -239,15 +289,53 @@ export default function ReportPage() {
         </Button>
       </div>
 
-      {loading && !report ? (
-        <div className="flex flex-col items-center gap-4 py-16">
-          <div className="relative">
-            <div className="h-10 w-10 rounded-full border-4 border-muted animate-spin border-t-primary" />
-          </div>
-          <div className="text-center space-y-1">
-            <p className="text-sm font-medium">Génération du rapport en cours...</p>
-            <p className="text-xs text-muted-foreground">Analyse des données avec l'IA, cela peut prendre 20-30 secondes</p>
-          </div>
+      {loading ? (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Progress indicator */}
+          {progress && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">{progress.label}</span>
+                <span className="font-mono text-xs text-muted-foreground">{progress.step}/{progress.total}</span>
+              </div>
+              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-500 ease-out"
+                  style={{ width: `${(progress.step / progress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {!progress && (
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <div className="h-4 w-4 rounded-full border-2 border-muted animate-spin border-t-primary" />
+              Chargement...
+            </div>
+          )}
+
+          {/* Skeleton cards */}
+          <Card className="py-4 gap-0">
+            <CardContent className="space-y-2">
+              <div className="h-4 w-48 bg-muted rounded animate-pulse" />
+              <div className="h-3 w-full bg-muted rounded animate-pulse" />
+            </CardContent>
+          </Card>
+          {[1, 2, 3].map(i => (
+            <Card key={i} className="py-3 gap-0">
+              <CardContent className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2.5 w-2.5 rounded-full bg-muted animate-pulse" />
+                    <div className="h-4 w-32 bg-muted rounded animate-pulse" />
+                  </div>
+                  <div className="h-4 w-12 bg-muted rounded animate-pulse" />
+                </div>
+                <div className="pl-6">
+                  <div className="h-8 w-full bg-muted rounded animate-pulse" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       ) : !report ? (
         <p className="text-center text-muted-foreground py-12">Aucune donnee disponible.</p>
@@ -276,6 +364,16 @@ export default function ReportPage() {
             </CardContent>
           </Card>
 
+          {report.gaps && report.gaps.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {report.gaps.map((g, i) => (
+                <span key={i} className="text-xs bg-muted px-2 py-1 rounded-full text-muted-foreground">
+                  Pause {new Date(g.from).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})} → {new Date(g.to).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})} ({g.durationMinutes}min)
+                </span>
+              ))}
+            </div>
+          )}
+
           {/* Suggested entries */}
           {editEntries.length > 0 && (
             <section className="space-y-3">
@@ -292,7 +390,16 @@ export default function ReportPage() {
                             onChange={e => updateEntry(i, { selected: e.target.checked })}
                             className="h-4 w-4 rounded accent-primary cursor-pointer"
                           />
-                          <span className="font-medium text-sm">{activityLabel(entry.activityId)}</span>
+                          <div className="flex items-center gap-2">
+                            <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${
+                              entry.confidence === 'high' ? 'bg-green-500' :
+                              entry.confidence === 'medium' ? 'bg-yellow-500' : 'bg-red-400'
+                            }`} title={`Confiance ${entry.confidence} — source: ${entry.source}`} />
+                            {entry.source && entry.source !== 'cmux' && (
+                              <span className="text-[10px] text-muted-foreground">{entry.source}</span>
+                            )}
+                            <span className="font-medium text-sm">{activityLabel(entry.activityId)}</span>
+                          </div>
                         </div>
                         <span className="font-mono text-sm font-semibold tabular-nums">{formatDuration(entry.roundedMinutes)}</span>
                       </div>
@@ -425,29 +532,6 @@ export default function ReportPage() {
             </section>
           )}
 
-          {/* Audio transcriptions */}
-          {audioSegments.length > 0 && (
-            <section className="space-y-3">
-              <button
-                onClick={() => setShowAudio(v => !v)}
-                className="flex items-center gap-2 text-lg font-semibold hover:text-primary transition-colors"
-              >
-                <Mic className="h-4 w-4" />
-                Transcriptions audio ({audioSegments.length})
-                <ChevronDown className={`h-4 w-4 transition-transform ${showAudio ? 'rotate-180' : ''}`} />
-              </button>
-              {showAudio && (
-                <div className="space-y-1">
-                  {audioSegments.map((seg, i) => (
-                    <div key={i} className="flex gap-3 text-sm px-3 py-2 rounded-lg bg-muted/50">
-                      <span className="text-muted-foreground shrink-0 tabular-nums">{new Date(seg.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
-                      <span>{seg.transcript}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
 
           {/* Claude Code prompts */}
           {claudePrompts.length > 0 && (
@@ -474,9 +558,22 @@ export default function ReportPage() {
             </section>
           )}
 
-          {/* Validate button */}
+          {/* Action buttons */}
           {report.status !== 'validated' && (editEntries.some(e => e.selected) || editUnmatched.some(e => e.selected && e.activityId)) && (
-            <div className="text-center pt-2">
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <Button variant="outline" onClick={handleRecalculate} disabled={regeneratingDescs}>
+                {regeneratingDescs ? (
+                  <>
+                    <div className="h-3.5 w-3.5 rounded-full border-2 border-muted animate-spin border-t-foreground" />
+                    Descriptions...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    Recalculer
+                  </>
+                )}
+              </Button>
               <Button size="lg" onClick={handleValidate} disabled={validating} className="text-base font-semibold px-8">
                 <Check className="h-5 w-5" />
                 Tout valider ({editEntries.filter(e => e.selected).length + editUnmatched.filter(e => e.selected && e.activityId).length} entrée(s))

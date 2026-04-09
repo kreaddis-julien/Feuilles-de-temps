@@ -74,6 +74,9 @@ export interface ClaudePrompt {
   prompt: string;
   sessionId: string;
   project: string;
+  gitBranch?: string;
+  gitLastCommit?: string;
+  gitDirtyFiles?: number;
 }
 
 export interface TrackingDay {
@@ -95,6 +98,7 @@ export interface TrackingReport {
   unmatched: UnmatchedBlock[];
   totalTrackedMinutes: number;
   aiEnhanced?: boolean;
+  gaps?: { from: string; to: string; durationMinutes: number }[];
 }
 
 export interface ReportBlock {
@@ -103,11 +107,12 @@ export interface ReportBlock {
   app: string;
   title: string;
   url?: string;
+  domain?: string;
   totalMinutes: number;
   totalSeconds: number;
   activityId?: string;
   customerName?: string;
-  confidence: number;
+  confidence?: 'high' | 'medium' | 'low';
 }
 
 export interface SuggestedEntry {
@@ -116,7 +121,8 @@ export interface SuggestedEntry {
   description: string;
   totalMinutes: number;
   roundedMinutes: number;
-  confidence: number;
+  confidence: 'high' | 'medium' | 'low';
+  source: 'cmux' | 'claude' | 'domain' | 'calendar' | 'llm' | 'default';
   blockCount: number;
 }
 
@@ -128,6 +134,12 @@ export interface UnmatchedBlock {
   url?: string;
   domain?: string;
   totalMinutes: number;
+}
+
+export interface StyleProfile {
+  descriptionsByActivity: Record<string, string[]>;
+  corrections: { proposed: string; corrected: string; activityId: string }[];
+  updatedAt: string;
 }
 
 export interface TrackingConfig {
