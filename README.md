@@ -12,21 +12,21 @@ Application web locale de suivi du temps avec gestion des interruptions (pile LI
 
 ## Prérequis
 
-- [Bun](https://bun.sh/) (v1.0+)
+- [Node.js](https://nodejs.org/) (v22+)
 
 ## Installation
 
 ```bash
 git clone https://github.com/kreaddis-julien/timesheet.git
 cd timesheet
-bun install
+npm install
 ```
 
 ## Démarrage
 
 ```bash
 # Lancer le frontend et le backend en parallèle
-bun run dev
+npm run dev
 ```
 
 L'application est accessible sur **http://localhost:5173**. Le serveur API tourne sur le port 3001 (le proxy Vite redirige automatiquement les appels `/api`).
@@ -34,16 +34,16 @@ L'application est accessible sur **http://localhost:5173**. Le serveur API tourn
 Pour lancer les serveurs séparément :
 
 ```bash
-bun run dev:server   # Backend uniquement (port 3001)
-bun run dev:client   # Frontend uniquement (port 5173)
+npm run dev:server   # Backend uniquement (port 3001)
+npm run dev:client   # Frontend uniquement (port 5173)
 ```
 
 ## Tests
 
 ```bash
-bun run test          # Tous les tests
-bun run test:server   # Tests serveur uniquement
-bun run test:client   # Tests client uniquement
+npm run test          # Tous les tests
+npm run test:server   # Tests serveur uniquement
+npm run test:client   # Tests client uniquement
 ```
 
 ## Stack technique
@@ -51,7 +51,7 @@ bun run test:client   # Tests client uniquement
 | Couche | Technologies |
 |--------|-------------|
 | Frontend | React 19, TypeScript, Vite, React Router |
-| Backend | Express 5, TypeScript, Bun |
+| Backend | Express 5, TypeScript, Node |
 | Stockage | Fichiers JSON (`data/`) — un fichier par jour + registre projets |
 | Tests | Vitest, Testing Library, Supertest |
 

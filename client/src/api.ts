@@ -1,7 +1,8 @@
-import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData, Customer, TrackingDay, TrackingReport, ScreenSession, IdlePeriod, TrackingConfig } from './types';
+import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData, Customer } from './types';
 
-const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
-export const BASE = isTauri ? 'http://localhost:3001/api' : '/api';
+// Relative path works in every mode: Vite dev proxies /api to :3001,
+// and the packaged Electron app serves the frontend from :3001 itself.
+export const BASE = '/api';
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
@@ -90,52 +91,6 @@ export const mergeEntries = (date: string, body: {
   json<TimesheetDay>(`/timesheet/${date}/entries/merge`, {
     method: 'POST',
     body: JSON.stringify(body),
-  });
-
-// Tracking
-export const getTracking = (date: string) =>
-  json<TrackingDay>(`/tracking/${date}`);
-
-export const postScreenSession = (date: string, session: ScreenSession) =>
-  json<{ ok: boolean }>(`/tracking/${date}/screen`, {
-    method: 'POST',
-    body: JSON.stringify(session),
-  });
-
-export const postIdlePeriod = (date: string, idle: IdlePeriod) =>
-  json<{ ok: boolean }>(`/tracking/${date}/idle`, {
-    method: 'POST',
-    body: JSON.stringify(idle),
-  });
-
-export const getTrackingConfig = () =>
-  json<TrackingConfig>('/tracking/config/current');
-
-export const updateTrackingConfig = (config: Partial<TrackingConfig>) =>
-  json<TrackingConfig>('/tracking/config/current', {
-    method: 'PUT',
-    body: JSON.stringify(config),
-  });
-
-// Reports
-export const getReportDates = () =>
-  json<{ date: string; hasReport: boolean; status: string | null }[]>('/report');
-
-export const getReport = (date: string) =>
-  json<TrackingReport | null>(`/report/${date}`);
-
-export const generateReport = (date: string) =>
-  json<TrackingReport>(`/report/${date}/generate`, { method: 'POST' });
-
-export const validateReport = (date: string, entries: { activityId: string; description: string; roundedMinutes: number }[]) =>
-  json<{ ok: boolean; entriesCreated: number }>(`/report/${date}/validate`, {
-    method: 'POST',
-    body: JSON.stringify({ entries }),
-  });
-
-export const unvalidateReport = (date: string) =>
-  json<{ ok: boolean; entriesRemoved: number }>(`/report/${date}/unvalidate`, {
-    method: 'POST',
   });
 
 // Deferred

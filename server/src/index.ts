@@ -11,9 +11,6 @@ const STATIC_DIR = getArg('--static-dir');
 const app = createApp(DATA_DIR, { staticDir: STATIC_DIR });
 
 const PORT = 3001;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://0.0.0.0:${PORT}`);
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`Server running on http://127.0.0.1:${PORT}`);
 });
-
-// Keep the Bun runtime alive (Bun exits if no active handles remain)
-setInterval(() => {}, 1000 * 60 * 60);

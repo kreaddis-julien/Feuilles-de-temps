@@ -1,16 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom';
-import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Download, Moon, Sun, QrCode, Clock, X } from 'lucide-react';
+import { Download, Moon, Sun, Clock, X } from 'lucide-react';
 import { DatePicker } from '@/components/ui/date-picker';
 import type { TimesheetEntry } from './types';
 import TrackerPage from './pages/TrackerPage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
-import ReportPage from './pages/ReportPage';
 import TrayPopupPage from './pages/TrayPopupPage';
 import * as api from './api';
 
@@ -25,7 +23,6 @@ function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
 
 function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
@@ -52,12 +49,10 @@ function addDays(dateStr: string, n: number): string {
 }
 
 function AppInner() {
-  // Tauri loads the popup window with a hash: index.html#/tray-popup
+  // Electron loads the popup window with a hash: #/tray-popup
   const isTrayPopup = typeof window !== 'undefined' && window.location.hash.includes('#/tray-popup');
 
   const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
-  const [qrOpen, setQrOpen] = useState(false);
-  const [mobileUrl, setMobileUrl] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFrom, setExportFrom] = useState('');
   const [exportTo, setExportTo] = useState('');
@@ -85,14 +80,6 @@ function AppInner() {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('theme', theme);
   }, [theme]);
-
-  useEffect(() => {
-    if (!qrOpen || mobileUrl) return;
-    fetch(`${api.BASE}/network`)
-      .then(r => r.json())
-      .then(({ ip, port }) => { if (ip) setMobileUrl(`http://${ip}:${port}`); })
-      .catch(() => {});
-  }, [qrOpen, mobileUrl]);
 
   function openExportDialog() {
     setExportMode('week');
@@ -166,18 +153,6 @@ function AppInner() {
             Stats
           </NavLink>
           <NavLink
-            to="/report"
-            className={({ isActive }) =>
-              `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                isActive
-                  ? 'text-primary bg-primary/10 font-semibold'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-              }`
-            }
-          >
-            Rapport
-          </NavLink>
-          <NavLink
             to="/settings"
             className={({ isActive }) =>
               `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
@@ -233,11 +208,6 @@ function AppInner() {
               </PopoverContent>
             </Popover>
           )}
-          {isTauri && (
-            <Button variant="outline" size="icon" onClick={() => setQrOpen(true)} title="Accès mobile">
-              <QrCode className="h-4 w-4" />
-            </Button>
-          )}
           <Button variant="outline" size="icon" onClick={openExportDialog} title="Exporter CSV">
             <Download className="h-4 w-4" />
           </Button>
@@ -255,27 +225,9 @@ function AppInner() {
         <Routes>
           <Route path="/" element={<TrackerPage />} />
           <Route path="/stats" element={<StatsPage />} />
-          <Route path="/report" element={<ReportPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
-      <Dialog open={qrOpen} onOpenChange={setQrOpen}>
-        <DialogContent className="max-w-xs">
-          <DialogHeader>
-            <DialogTitle>Accès mobile</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col items-center gap-4 py-4">
-            {mobileUrl ? (
-              <>
-                <QRCodeSVG value={mobileUrl} size={200} />
-                <p className="text-sm text-muted-foreground text-center font-mono">{mobileUrl}</p>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">Recherche du réseau...</p>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
