@@ -83,6 +83,11 @@ function createPopupWindow() {
     skipTaskbar: true,
     hasShadow: true,
     fullscreenable: false,
+    // NSPanel non-activant (comme l'ancien tauri_nspanel) : la popup
+    // s'affiche au-dessus des apps plein ecran sans activer Tempo,
+    // donc sans changer de space (meme mecanisme que la popup batterie).
+    type: 'panel',
+    hiddenInMissionControl: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
