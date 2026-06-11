@@ -3,7 +3,6 @@ import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData } from
 import * as api from '../api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -38,6 +37,19 @@ function formatDuration(minutes: number): string {
   if (h === 0) return `${m}min`;
   if (m === 0) return `${h}h`;
   return `${h}h${String(m).padStart(2, '0')}`;
+}
+
+function computeElapsedSeconds(entry: TimesheetEntry): number {
+  let totalSec = 0;
+  for (const seg of entry.segments) {
+    const startMs = parseTimestamp(seg.start).getTime();
+    if (seg.end) {
+      totalSec += Math.floor((parseTimestamp(seg.end).getTime() - startMs) / 1000);
+    } else {
+      totalSec += Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+    }
+  }
+  return totalSec;
 }
 
 function formatTimer(totalSeconds: number): string {
@@ -166,18 +178,6 @@ export default function TrackerPage() {
       updateTrayTitle(pausedEntries.length > 0 ? '⏸' : '');
       return;
     }
-    function computeElapsedSeconds(entry: TimesheetEntry): number {
-      let totalSec = 0;
-      for (const seg of entry.segments) {
-        const startMs = parseTimestamp(seg.start).getTime();
-        if (seg.end) {
-          totalSec += Math.floor((parseTimestamp(seg.end).getTime() - startMs) / 1000);
-        } else {
-          totalSec += Math.max(0, Math.floor((Date.now() - startMs) / 1000));
-        }
-      }
-      return totalSec;
-    }
     function tick() {
       const map: Record<string, number> = {};
       for (const entry of activeEntries) {
@@ -200,9 +200,11 @@ export default function TrackerPage() {
 
   const completedMinutes = completedEntries.reduce((s, e) => s + e.roundedMinutes, 0);
   const activeMinutes = activeEntries.reduce((sum, e) => sum + Math.round((elapsedMap[e.id] ?? 0) / 60), 0);
-  const totalMinutes = completedMinutes + activeMinutes;
+  const pausedMinutes = pausedEntries.reduce((sum, e) => sum + Math.round(computeElapsedSeconds(e) / 60), 0);
+  const totalMinutes = completedMinutes + activeMinutes + pausedMinutes;
   const TARGET = 420;
-  const progressPct = Math.min(100, (totalMinutes / TARGET) * 100);
+  const runningPct = Math.min(100, ((completedMinutes + activeMinutes) / TARGET) * 100);
+  const pausedPct = Math.min(100 - runningPct, (pausedMinutes / TARGET) * 100);
 
   async function handlePause(entry: TimesheetEntry) {
     if (!day) return;
@@ -364,11 +366,17 @@ export default function TrackerPage() {
         )}
       </div>
 
-      {/* ===== Progress Bar ===== */}
+      {/* ===== Progress Bar (stacked: running + paused greyed) ===== */}
       <div>
-        <Progress value={progressPct} />
+        <div className="bg-primary/20 relative h-2 w-full overflow-hidden rounded-full flex">
+          <div className="bg-primary h-full transition-all" style={{ width: `${runningPct}%` }} />
+          <div className="bg-muted-foreground/40 h-full transition-all" style={{ width: `${pausedPct}%` }} />
+        </div>
         <p className="text-center mt-1.5 text-sm font-medium tabular-nums text-muted-foreground">
           {formatDuration(totalMinutes)} / {formatDuration(TARGET)}
+          {pausedMinutes > 0 && (
+            <span className="text-muted-foreground/60"> · dont {formatDuration(pausedMinutes)} en pause</span>
+          )}
         </p>
       </div>
 
