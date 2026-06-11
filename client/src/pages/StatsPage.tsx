@@ -70,7 +70,7 @@ function formatMonthFR(dateStr: string): string {
   return `${months[m - 1]} ${y}`;
 }
 
-const COLORS = ['#49aeff', '#fc0036', '#29a948', '#ffae00', '#f32882', '#00ac96', '#f97ea8', '#a8a8a8'];
+const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16', '#94a3b8'];
 
 /** Resolve a CSS custom property to its computed value. */
 function cssVar(name: string): string {
@@ -87,6 +87,7 @@ function useChartTheme() {
   }, []);
   return useMemo(() => ({
     primary: cssVar('--primary'),
+    tempo: cssVar('--tempo'),
     foreground: cssVar('--foreground'),
     mutedForeground: cssVar('--muted-foreground'),
     card: cssVar('--card'),
@@ -273,10 +274,10 @@ export default function StatsPage() {
         return (
           <div className={`grid gap-4 sm:gap-4`} style={{ gridTemplateColumns: `repeat(${cards.length}, minmax(0, 1fr))` }}>
             {cards.map(({ value, label }) => (
-              <Card key={label} className="py-4 gap-0">
-                <CardContent className="text-center">
-                  <div className="text-2xl font-bold text-primary tabular-nums">{value}</div>
-                  <div className="text-xs text-muted-foreground uppercase tracking-wide mt-1">{label}</div>
+              <Card key={label} className="py-5 gap-0 shadow-xs">
+                <CardContent>
+                  <div className="font-mono text-3xl font-medium tracking-tight tabular-nums">{value}</div>
+                  <div className="text-xs text-muted-foreground mt-1.5">{label}</div>
                 </CardContent>
               </Card>
             ))}
@@ -287,7 +288,7 @@ export default function StatsPage() {
       {/* Daily bar chart */}
       {dayData.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold">Heures par jour</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Heures par jour</h2>
           <ResponsiveContainer width="100%" height={250}>
             <BarChart data={dayData}>
               <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
@@ -299,7 +300,7 @@ export default function StatsPage() {
                 cursor={{ fill: theme.border, opacity: 0.3 }}
                 formatter={(value: unknown) => [`${value ?? 0}h`, 'Heures']}
               />
-              <Bar dataKey="hours" fill={theme.primary} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="hours" fill={theme.tempo} radius={[5, 5, 0, 0]} maxBarSize={44} />
             </BarChart>
           </ResponsiveContainer>
         </section>
@@ -309,7 +310,7 @@ export default function StatsPage() {
       <div className="flex gap-4 lg:gap-6 max-sm:flex-col">
         {stats.byCustomer.length > 0 && (
           <section className="flex-1 min-w-0 space-y-3">
-            <h2 className="text-lg font-semibold">Par client</h2>
+            <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Par client</h2>
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
@@ -318,6 +319,8 @@ export default function StatsPage() {
                   nameKey="name"
                   cx="50%" cy="50%"
                   outerRadius={90}
+                  innerRadius={58}
+                  paddingAngle={2}
                   stroke="none"
                 >
                   {stats.byCustomer.map((_, i) => (
@@ -333,7 +336,7 @@ export default function StatsPage() {
 
         {stats.byType.length > 0 && (
           <section className="flex-1 min-w-0 space-y-3">
-            <h2 className="text-lg font-semibold">Interne / Externe</h2>
+            <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Interne / Externe</h2>
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
@@ -342,6 +345,8 @@ export default function StatsPage() {
                   nameKey="label"
                   cx="50%" cy="50%"
                   outerRadius={90}
+                  innerRadius={58}
+                  paddingAngle={2}
                   stroke="none"
                 >
                   {stats.byType.map((_, i) => (
@@ -360,7 +365,7 @@ export default function StatsPage() {
       <div className="flex gap-4 lg:gap-6 max-sm:flex-col">
         {stats.byActivity.length > 0 && (
           <section className="flex-1 min-w-0 space-y-3">
-            <h2 className="text-lg font-semibold">Par activité (détaillé)</h2>
+            <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Par activité (détaillé)</h2>
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
@@ -369,6 +374,8 @@ export default function StatsPage() {
                   nameKey="label"
                   cx="50%" cy="50%"
                   outerRadius={90}
+                  innerRadius={58}
+                  paddingAngle={2}
                   stroke="none"
                 >
                   {stats.byActivity.map((_, i) => (
@@ -384,7 +391,7 @@ export default function StatsPage() {
 
         {stats.byActivity.length > 0 && (
           <section className="flex-1 min-w-0 space-y-3">
-            <h2 className="text-lg font-semibold">Par activité</h2>
+            <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Par activité</h2>
             {(() => {
               const grouped = stats.byActivity.reduce<Record<string, number>>((acc, a) => {
                 acc[a.name] = (acc[a.name] || 0) + a.minutes;
@@ -395,7 +402,9 @@ export default function StatsPage() {
               return (
                 <ResponsiveContainer width="100%" height={280}>
                   <PieChart>
-                    <Pie data={data} dataKey="hours" nameKey="name" cx="50%" cy="50%" outerRadius={90} stroke="none">
+                    <Pie data={data} dataKey="hours" nameKey="name" cx="50%" cy="50%" outerRadius={90}
+                  innerRadius={58}
+                  paddingAngle={2} stroke="none">
                       {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                     </Pie>
                     <Tooltip content={<PieTooltip />} />
