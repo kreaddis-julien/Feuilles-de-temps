@@ -126,46 +126,30 @@ function AppInner() {
 
   return (
     <>
-      <nav className="relative flex items-center justify-center px-5 h-14 bg-card border-b border-border sticky top-0 z-50">
-        <div className="flex gap-1.5">
-          <NavLink
-            to="/"
-            className={({ isActive }) =>
-              `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                isActive
-                  ? 'text-primary bg-primary/10 font-semibold'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-              }`
-            }
-          >
-            Tempo
-          </NavLink>
-          <NavLink
-            to="/stats"
-            className={({ isActive }) =>
-              `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                isActive
-                  ? 'text-primary bg-primary/10 font-semibold'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-              }`
-            }
-          >
-            Stats
-          </NavLink>
-          <NavLink
-            to="/settings"
-            className={({ isActive }) =>
-              `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                isActive
-                  ? 'text-primary bg-primary/10 font-semibold'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-              }`
-            }
-          >
-            Paramètres
-          </NavLink>
-        </div>
-        <div className="absolute right-5 flex items-center gap-1.5">
+      <header className="sticky top-0 z-50 bg-background/85 backdrop-blur-md border-b border-border">
+        <div className="flex items-center justify-between pl-5 pr-8 h-[52px] max-w-5xl mx-auto">
+          <nav className="flex items-end self-stretch gap-1">
+            {([
+              { to: '/', label: 'Timer' },
+              { to: '/stats', label: 'Statistiques' },
+              { to: '/settings', label: 'Paramètres' },
+            ] as const).map(({ to, label }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) =>
+                  `relative inline-flex items-center px-3 pb-3 pt-2 text-sm transition-colors ${
+                    isActive
+                      ? 'text-foreground font-medium after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:rounded-full after:bg-foreground'
+                      : 'text-muted-foreground hover:text-foreground font-normal'
+                  }`
+                }
+              >
+                {label}
+              </NavLink>
+            ))}
+          </nav>
+          <div className="flex items-center gap-1.5">
           {deferredEntries.length > 0 && (
             <Popover open={deferredOpen} onOpenChange={setDeferredOpen}>
               <PopoverTrigger asChild>
@@ -220,8 +204,9 @@ function AppInner() {
             {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           </Button>
         </div>
-      </nav>
-      <main className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-12">
+        </div>
+      </header>
+      <main className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-16">
         <Routes>
           <Route path="/" element={<TrackerPage />} />
           <Route path="/stats" element={<StatsPage />} />

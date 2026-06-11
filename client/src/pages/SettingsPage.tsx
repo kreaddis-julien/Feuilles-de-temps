@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { Search, X, Plus, Trash2, ChevronLeft } from 'lucide-react';
+import { Search, X, Plus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function SettingsPage() {
   const [activities, setActivities] = useState<ActivitiesData>({ activities: [] });
@@ -105,24 +105,13 @@ export default function SettingsPage() {
     <div className="space-y-6 animate-in fade-in duration-200">
       {!editingCust && (
         <section className="space-y-4">
-          {/* Search + Add */}
-          <div className="flex gap-2 items-center">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Rechercher un client..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
+          {/* Page header */}
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h1 className="font-display text-2xl font-semibold tracking-tight">Clients</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {customers.customers.length} client{customers.customers.length > 1 ? 's' : ''} · gérez leurs activités facturables
+              </p>
             </div>
             <Button size="sm" onClick={() => { setNewCustName(''); setNewCustType('externe'); setNewCustActivities(new Set()); setShowNewCust(true); }}>
               <Plus className="h-4 w-4" />
@@ -130,47 +119,60 @@ export default function SettingsPage() {
             </Button>
           </div>
 
-          {/* Client grid */}
-          <div className="grid gap-2 sm:grid-cols-2">
+          {/* Search */}
+          <div className="relative max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Rechercher un client..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Client list (Vercel-style rows) */}
+          <div className="rounded-lg border border-border divide-y divide-border overflow-hidden">
             {filteredCustomers.map((c) => {
               const custActivities = getCustomerActivities(c.id);
               return (
-                <Card
+                <button
                   key={c.id}
-                  className="py-3 gap-0 cursor-pointer hover:border-primary/50 transition-colors group"
+                  className="w-full flex items-center justify-between gap-4 px-4 py-3.5 text-left bg-card hover:bg-accent/60 transition-colors cursor-pointer"
                   onClick={() => openEditCustomer(c)}
                 >
-                  <CardContent className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <strong className="text-sm font-semibold">{c.name}</strong>
-                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                          c.type === 'interne'
-                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                            : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                        }`}>
-                          {typeLabel(c.type)}
-                        </span>
-                      </div>
-                    </div>
-                    {custActivities.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {custActivities.map((a) => (
-                          <span key={a.id} className="text-xs bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
-                            {a.name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span
+                      className={`h-2 w-2 rounded-full shrink-0 ${c.type === 'interne' ? 'bg-tempo' : 'bg-success'}`}
+                      aria-hidden="true"
+                    />
+                    <span className="text-sm font-medium truncate">{c.name}</span>
+                    <span className="text-xs text-muted-foreground shrink-0">{typeLabel(c.type)}</span>
+                  </div>
+                  <div className="flex items-center gap-3 min-w-0 shrink">
+                    <span className="text-xs text-muted-foreground truncate">
+                      {custActivities.length > 0
+                        ? custActivities.map(a => a.name).join(' · ')
+                        : 'Aucune activité'}
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
+                  </div>
+                </button>
               );
             })}
+            {filteredCustomers.length === 0 && (
+              <p className="text-center text-muted-foreground py-10 text-sm bg-card">
+                {searchQuery ? `Aucun client trouvé pour "${searchQuery}"` : 'Aucun client pour le moment'}
+              </p>
+            )}
           </div>
-
-          {filteredCustomers.length === 0 && searchQuery && (
-            <p className="text-center text-muted-foreground py-8 text-sm">Aucun client trouvé pour "{searchQuery}"</p>
-          )}
         </section>
       )}
 
@@ -178,15 +180,15 @@ export default function SettingsPage() {
       {editingCust && (
         <section className="space-y-6">
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="icon" onClick={() => setEditingCust(null)}>
+            <Button variant="ghost" size="icon" className="h-8 w-8 -ml-2" onClick={() => setEditingCust(null)}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <h2 className="text-xl font-semibold">{editingCust.name}</h2>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-              editingCust.type === 'interne'
-                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-            }`}>
+            <h1 className="font-display text-2xl font-semibold tracking-tight">{editingCust.name}</h1>
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span
+                className={`h-2 w-2 rounded-full ${editingCust.type === 'interne' ? 'bg-tempo' : 'bg-success'}`}
+                aria-hidden="true"
+              />
               {typeLabel(editingCust.type)}
             </span>
           </div>
@@ -221,21 +223,23 @@ export default function SettingsPage() {
 
           {/* Activities as toggleable chips */}
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Activités</h3>
-            <div className="flex flex-wrap gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Activités facturables</h3>
+            <div className="flex flex-wrap gap-1.5">
               {activityCategories.map((name) => {
                 const isActive = activities.activities.some(a => a.customerId === editingCust.id && a.name === name);
                 return (
                   <button
                     key={name}
                     onClick={() => toggleActivity(editingCust.id, name)}
-                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    aria-pressed={isActive}
+                    className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-sm transition-all cursor-pointer ${
                       isActive
-                        ? 'bg-primary text-primary-foreground shadow-sm'
-                        : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
+                        ? 'border-foreground bg-foreground text-background font-medium'
+                        : 'border-border bg-transparent text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground'
                     }`}
                   >
-                    {isActive ? '✓ ' : ''}{name}
+                    {isActive && <span aria-hidden="true">✓</span>}
+                    {name}
                   </button>
                 );
               })}
@@ -246,27 +250,30 @@ export default function SettingsPage() {
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value)}
                     placeholder="Nom..."
-                    className="h-8 w-28 rounded-full border border-input bg-transparent px-3 text-sm"
+                    className="h-8 w-28 rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
                     onBlur={() => { if (!newCategoryName.trim()) setAddingCategory(false); }}
                   />
-                  <Button type="submit" size="sm" className="h-8 rounded-full">OK</Button>
+                  <Button type="submit" size="sm" className="h-8">OK</Button>
                 </form>
               ) : (
                 <button
                   onClick={() => { setNewCategoryName(''); setAddingCategory(true); }}
-                  className="px-3 py-1.5 rounded-full text-sm font-medium border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-all"
+                  className="inline-flex items-center gap-1 h-8 px-3 rounded-md border border-dashed border-border text-sm text-muted-foreground hover:text-foreground hover:border-muted-foreground/60 transition-all cursor-pointer"
                 >
-                  + Autre
+                  <Plus className="h-3.5 w-3.5" />
+                  Autre
                 </button>
               )}
             </div>
+            <p className="text-xs text-muted-foreground">Cliquez pour activer ou désactiver une activité pour ce client.</p>
           </div>
 
           {/* Danger zone */}
           <div className="pt-4 border-t border-border">
             <Button
-              variant="destructive"
+              variant="ghost"
               size="sm"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
               onClick={async () => {
                 if (!confirm(`Supprimer le client "${editingCust.name}" et toutes ses activités ?`)) return;
                 // Delete all activities for this customer first
@@ -318,13 +325,14 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-2">
               <label className="text-xs text-muted-foreground">Activités</label>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {activityCategories.map((name) => {
                   const isActive = newCustActivities.has(name);
                   return (
                     <button
                       key={name}
                       type="button"
+                      aria-pressed={isActive}
                       onClick={() => {
                         setNewCustActivities(prev => {
                           const next = new Set(prev);
@@ -332,13 +340,14 @@ export default function SettingsPage() {
                           return next;
                         });
                       }}
-                      className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-sm transition-all cursor-pointer ${
                         isActive
-                          ? 'bg-primary text-primary-foreground shadow-sm'
-                          : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
+                          ? 'border-foreground bg-foreground text-background font-medium'
+                          : 'border-border bg-transparent text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground'
                       }`}
                     >
-                      {isActive ? '✓ ' : ''}{name}
+                      {isActive && <span aria-hidden="true">✓</span>}
+                      {name}
                     </button>
                   );
                 })}

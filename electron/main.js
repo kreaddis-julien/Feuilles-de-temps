@@ -55,6 +55,7 @@ function createMainWindow() {
     title: 'Tempo',
     width: 1024,
     height: 768,
+    maxWidth: 1024,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -100,12 +101,97 @@ function createPopupWindow() {
   popupWindow.loadURL(frontendUrl('#/tray-popup'));
   // Hide when it loses focus (replaces the NSPanel delegate)
   popupWindow.on('blur', () => popupWindow.hide());
+  popupWindow.on('hide', () => {
+    stopPopupFocusWatch();
+    destroyClickCatcher();
+  });
   popupWindow.on('close', (e) => {
     if (!app.isQuittingForReal) {
       e.preventDefault();
       popupWindow.hide();
     }
   });
+}
+
+// On macOS the 'blur' event is unreliable for non-activating panels
+// (clicks on the desktop or the menu bar never fire it). Poll the focus
+// state while the popup is visible: once it has been key and loses it,
+// hide it - same behaviour as the Notification Center popover.
+let popupFocusPoll = null;
+
+function startPopupFocusWatch() {
+  stopPopupFocusWatch();
+  let everFocused = false;
+  popupFocusPoll = setInterval(() => {
+    if (!popupWindow || popupWindow.isDestroyed() || !popupWindow.isVisible()) {
+      stopPopupFocusWatch();
+      return;
+    }
+    if (popupWindow.isFocused()) {
+      everFocused = true;
+      return;
+    }
+    if (everFocused) {
+      popupWindow.hide();
+      stopPopupFocusWatch();
+    }
+  }, 250);
+}
+
+function stopPopupFocusWatch() {
+  if (popupFocusPoll) {
+    clearInterval(popupFocusPoll);
+    popupFocusPoll = null;
+  }
+}
+
+// Clicking the desktop gives key focus to no window at all, so neither
+// 'blur' nor the focus watch can see it. While the popup is open, an
+// invisible full-screen "click catcher" sits just below it: any click
+// outside the popup lands on it and closes the popup (same UX as the
+// Notification Center popover).
+let catcherWindow = null;
+
+function showClickCatcher() {
+  destroyClickCatcher();
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  catcherWindow = new BrowserWindow({
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
+    show: false,
+    frame: false,
+    transparent: true,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    resizable: false,
+    movable: false,
+    fullscreenable: false,
+    type: 'panel',
+    hiddenInMissionControl: true,
+  });
+  catcherWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  catcherWindow.setAlwaysOnTop(true, 'pop-up-menu');
+  // Background alpha 0.01: visually invisible but still receives clicks
+  // (macOS lets clicks pass through fully transparent pixels)
+  catcherWindow.loadURL(
+    'data:text/html,<body style="margin:0;width:100vw;height:100vh;background:rgba(0,0,0,0.01)" onmousedown="window.close()"></body>'
+  );
+  catcherWindow.on('closed', () => {
+    catcherWindow = null;
+    if (popupWindow && !popupWindow.isDestroyed()) popupWindow.hide();
+  });
+  catcherWindow.showInactive();
+}
+
+function destroyClickCatcher() {
+  if (catcherWindow && !catcherWindow.isDestroyed()) {
+    catcherWindow.removeAllListeners('closed');
+    catcherWindow.close();
+  }
+  catcherWindow = null;
 }
 
 function togglePopup(trayBounds) {
@@ -123,8 +209,10 @@ function togglePopup(trayBounds) {
     x = Math.min(Math.max(x, display.workArea.x + 8), maxX);
     popupWindow.setPosition(x, y, false);
   }
+  showClickCatcher();
   popupWindow.show();
   popupWindow.focus();
+  startPopupFocusWatch();
 }
 
 // ── Tray ─────────────────────────────────────────────────────────────────────
