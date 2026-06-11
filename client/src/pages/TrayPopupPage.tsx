@@ -1,16 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import type { TimesheetDay, TimesheetEntry, ActivitiesData, CustomersData } from '../types';
 import * as api from '../api';
-import { Play, Pause, CircleStop, Trash2, Plus, X, Clock, ChevronLeft } from 'lucide-react';
-
-const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
+import * as desktop from '../desktop';
+import { Play, Pause, CircleStop, Trash2, Plus, X, Clock, ChevronLeft, Maximize2 } from 'lucide-react';
 
 async function updateTrayTitle(text: string) {
-  if (!isTauri) return;
-  try {
-    await invoke('set_tray_title', { title: text });
-  } catch { /* ignore outside Tauri */ }
+  desktop.setTrayTitle(text);
 }
 
 // ---------------------------------------------------------------------------
@@ -161,10 +156,10 @@ export default function TrayPopupPage() {
     return () => clearInterval(id);
   }, [activeEntries.length, activeEntries.map(e => e.id).join(','), pausedEntries.length]);
 
-  // Popup close is handled entirely by Rust (NSPanel delegate in lib.rs)
+  // Popup auto-hide on blur is handled by the Electron main process (electron/main.js)
 
   async function close() {
-    await invoke('close_tray_popup').catch(() => {});
+    desktop.closeTrayPopup();
   }
 
   async function handlePause(entry: TimesheetEntry) {
@@ -356,13 +351,21 @@ export default function TrayPopupPage() {
           <Clock className="h-4 w-4 text-primary" />
           <span className="text-sm font-semibold text-foreground">Tempo</span>
         </div>
-        <button
-          onClick={close}
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          className="flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <button
+            onClick={() => desktop.openMainWindow()}
+            title="Ouvrir l'application"
+            className="flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={close}
+            className="flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">

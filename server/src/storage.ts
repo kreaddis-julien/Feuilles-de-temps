@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import type { CustomersData, ActivitiesData, TimesheetDay, TrackingDay, TrackingConfig } from './types.js';
+import type { CustomersData, ActivitiesData, TimesheetDay } from './types.js';
 
 export class Storage {
   private writeLocks = new Map<string, Promise<void>>();
@@ -158,48 +158,6 @@ export class Storage {
     );
   }
 
-  async listTrackingDates(): Promise<string[]> {
-    try {
-      const files = await fs.readdir(this.dataDir);
-      return files
-        .filter(f => /^activity-\d{4}-\d{2}-\d{2}\.json$/.test(f))
-        .map(f => f.replace('activity-', '').replace('.json', ''))
-        .sort()
-        .reverse();
-    } catch {
-      return [];
-    }
-  }
-
-  async loadTracking(date: string): Promise<TrackingDay> {
-    const filePath = path.join(this.dataDir, `activity-${date}.json`);
-    try {
-      const raw = JSON.parse(await fs.readFile(filePath, 'utf-8'));
-      return raw as TrackingDay;
-    } catch {
-      return { date, screenSessions: [], audioSegments: [], idlePeriods: [], report: null };
-    }
-  }
-
-  async saveTracking(data: TrackingDay): Promise<void> {
-    const filePath = path.join(this.dataDir, `activity-${data.date}.json`);
-    await this.atomicWrite(filePath, JSON.stringify(data, null, 2));
-  }
-
-  async loadTrackingConfig(): Promise<TrackingConfig> {
-    const filePath = path.join(this.dataDir, 'tracking-config.json');
-    try {
-      return JSON.parse(await fs.readFile(filePath, 'utf-8')) as TrackingConfig;
-    } catch {
-      return { screenEnabled: true, micEnabled: false };
-    }
-  }
-
-  async saveTrackingConfig(config: TrackingConfig): Promise<void> {
-    const filePath = path.join(this.dataDir, 'tracking-config.json');
-    await this.atomicWrite(filePath, JSON.stringify(config, null, 2));
-  }
-
   async withTimesheet(date: string, fn: (data: TimesheetDay) => void | Promise<void>): Promise<TimesheetDay> {
     const filePath = path.join(this.dataDir, `${date}.json`);
     // Reuse the same lock mechanism as atomicWrite
@@ -212,40 +170,5 @@ export class Storage {
     });
     this.writeLocks.set(filePath, op.then(() => {}, () => {}));
     return op;
-  }
-
-  async withTracking(date: string, fn: (data: TrackingDay) => void | Promise<void>): Promise<TrackingDay> {
-    const filePath = path.join(this.dataDir, `activity-${date}.json`);
-    const prev = this.writeLocks.get(filePath) ?? Promise.resolve();
-    const op = prev.then(async () => {
-      const data = await this.loadTracking(date);
-      await fn(data);
-      await fs.writeFile(filePath, JSON.stringify(data, null, 2));
-      return data;
-    });
-    this.writeLocks.set(filePath, op.then(() => {}, () => {}));
-    return op;
-  }
-
-  async cleanupOldTracking(retentionDays: number = 30): Promise<number> {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - retentionDays);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
-    let deleted = 0;
-
-    try {
-      const files = await fs.readdir(this.dataDir);
-      for (const file of files) {
-        const match = file.match(/^activity-(\d{4}-\d{2}-\d{2})\.json$/);
-        if (match && match[1] < cutoffStr) {
-          await fs.unlink(path.join(this.dataDir, file));
-          deleted++;
-        }
-      }
-    } catch {
-      // directory might not exist yet
-    }
-
-    return deleted;
   }
 }

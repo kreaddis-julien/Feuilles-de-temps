@@ -19,5 +19,16 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Too aggressive on async fetch-on-mount effects (setState after await)
+      'react-hooks/set-state-in-effect': 'warn',
+    },
+  },
+  {
+    // shadcn/ui files export variants/helpers alongside components by design
+    files: ['src/components/ui/**/*.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
   },
 ])

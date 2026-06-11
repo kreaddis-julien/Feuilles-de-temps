@@ -4,9 +4,7 @@ data/
 exports/
 .env
 .DS_Store
-*.bun-build
 .worktrees/
 .claude/worktrees/
-src-tauri/target/
-src-tauri/binaries/
-src-tauri/timesheet-server-aarch64-apple-darwin
+dist-electron/
+electron/server-bundle.mjs

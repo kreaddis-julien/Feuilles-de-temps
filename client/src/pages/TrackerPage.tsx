@@ -14,14 +14,9 @@ import {
 } from '@/components/ui/dialog';
 import { ChevronLeft, ChevronRight, Play, Pause, CircleStop, Trash2, RotateCcw, CalendarDays, Clock, Merge } from 'lucide-react';
 
-const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
-
 async function updateTrayTitle(text: string) {
-  if (!isTauri) return;
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('set_tray_title', { title: text });
-  } catch { /* ignore outside Tauri */ }
+  const desktop = await import('../desktop');
+  desktop.setTrayTitle(text);
 }
 
 // ---------------------------------------------------------------------------
