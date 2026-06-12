@@ -349,7 +349,7 @@ export default function TrayPopupPage() {
       >
         <div className="flex items-center gap-2">
           <Clock className="h-4 w-4 text-primary" />
-          <span className="text-sm font-semibold text-foreground">Tempo</span>
+          <span className="text-sm font-semibold text-foreground">Feuilles de temps</span>
         </div>
         <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <button
