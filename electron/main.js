@@ -52,7 +52,7 @@ function hardenWebContents(win) {
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
-    title: 'Tempo',
+    title: 'Gestionnaire de feuilles de temps',
     width: 1024,
     height: 768,
     maxWidth: 1024,
@@ -276,7 +276,7 @@ app.whenReady().then(async () => {
     await startServer();
   } catch (err) {
     console.error('Server failed to start:', err);
-    dialog.showErrorBox('Tempo', `Le serveur local n'a pas pu demarrer (port ${PORT} occupe ?)\n\n${err.message}`);
+    dialog.showErrorBox('Gestionnaire de feuilles de temps', `Le serveur local n'a pas pu demarrer (port ${PORT} occupe ?)\n\n${err.message}`);
     app.exit(1);
     return;
   }

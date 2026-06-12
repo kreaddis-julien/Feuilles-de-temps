@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "version": "0.1.0",
-  "description": "Tempo - time tracker for Odoo timesheets",
+  "description": "Gestionnaire de feuilles de temps - time tracker for Odoo timesheets",
   "main": "electron/main.js",
   "workspaces": [
     "client",
@@ -20,7 +20,7 @@
     "build:client": "npm run build --workspace=client",
     "dev:electron": "npm run build:server-bundle && concurrently -k \"npm run dev:client\" \"electron . --dev\"",
     "build:app": "npm run build:client && npm run build:server-bundle && electron-builder",
-    "install:app": "pkill -f 'Tempo' || true; sleep 1; cp -R 'dist-electron/mac-arm64/Tempo.app' /Applications/ && open '/Applications/Tempo.app'"
+    "install:app": "pkill -f 'Gestionnaire de feuilles de temps' || true; pkill -f 'Tempo.app' || true; sleep 1; rm -rf '/Applications/Tempo.app'; cp -R 'dist-electron/mac-arm64/Gestionnaire de feuilles de temps.app' /Applications/ && open '/Applications/Gestionnaire de feuilles de temps.app'"
   },
   "devDependencies": {
     "concurrently": "^10.0.3",
@@ -30,7 +30,7 @@
   },
   "build": {
     "appId": "com.timesheet.tracker",
-    "productName": "Tempo",
+    "productName": "Gestionnaire de feuilles de temps",
     "directories": {
       "output": "dist-electron"
     },
