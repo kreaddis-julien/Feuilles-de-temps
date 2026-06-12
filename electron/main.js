@@ -184,6 +184,8 @@ function showClickCatcher() {
     if (popupWindow && !popupWindow.isDestroyed()) popupWindow.hide();
   });
   catcherWindow.showInactive();
+  // Creating a panel window can flip the app to accessory mode; keep the dock icon
+  if (app.dock && !app.dock.isVisible()) app.dock.show();
 }
 
 function destroyClickCatcher() {
@@ -281,10 +283,13 @@ app.whenReady().then(async () => {
     return;
   }
 
-  if (app.dock) app.dock.show();
   createMainWindow();
   createPopupWindow();
   await createTray();
+
+  // Creating 'panel' windows flips the activation policy to accessory
+  // (no dock icon). Re-assert the dock icon after they exist.
+  if (app.dock) await app.dock.show();
 
   // Autostart at login (replaces tauri-plugin-autostart)
   if (!IS_DEV) {
