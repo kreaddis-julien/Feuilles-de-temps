@@ -11,7 +11,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { ChevronLeft, ChevronRight, Play, Pause, CircleStop, Trash2, RotateCcw, CalendarDays, Clock, Merge } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Pause, CircleStop, Trash2, RotateCcw, CalendarDays, Clock, Merge, Pencil } from 'lucide-react';
 
 async function updateTrayTitle(text: string) {
   const desktop = await import('../desktop');
@@ -345,7 +345,9 @@ export default function TrackerPage() {
     setEditingEntry(entry);
     setEditActivityId(entry.activityId);
     setEditDescription(entry.description);
-    setEditMinutes(String(entry.roundedMinutes));
+    // Completed entries expose their rounded ("indiqué") duration; paused/active
+    // ones expose the real elapsed time.
+    setEditMinutes(String(entry.status === 'completed' ? entry.roundedMinutes : entry.totalMinutes));
   }
 
   async function saveEditModal() {
@@ -354,7 +356,14 @@ export default function TrackerPage() {
     if (editActivityId !== editingEntry.activityId) updates.activityId = editActivityId;
     if (editDescription !== editingEntry.description) updates.description = editDescription;
     const parsedMin = parseInt(editMinutes, 10);
-    if (!isNaN(parsedMin) && parsedMin !== editingEntry.roundedMinutes) updates.roundedMinutes = parsedMin;
+    if (!isNaN(parsedMin)) {
+      if (editingEntry.status === 'completed') {
+        if (parsedMin !== editingEntry.roundedMinutes) updates.roundedMinutes = parsedMin;
+      } else if (parsedMin !== editingEntry.totalMinutes) {
+        // Paused entry: rewrite the accumulated time (server rewrites segments).
+        updates.totalMinutes = parsedMin;
+      }
+    }
     if (Object.keys(updates).length > 0) {
       await api.updateEntry(currentDate, editingEntry.id, updates);
       await refresh(true);
@@ -535,6 +544,16 @@ export default function TrackerPage() {
                     </div>
                   </div>
                   <div className="flex gap-1.5 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEditModal(entry)}
+                      title="Modifier"
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Modifier
+                    </Button>
                     <Button variant="outline" size="sm" onClick={() => handleResume(entry.id)}>
                       <Play className="h-3.5 w-3.5" />
                       Reprendre

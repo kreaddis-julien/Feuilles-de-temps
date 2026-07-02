@@ -143,4 +143,45 @@ describe('Timesheet API', () => {
     expect(res.body.entries).toHaveLength(0);
     expect(res.body.activeEntries).toHaveLength(0);
   });
+
+  it('PATCH totalMinutes edits a paused entry and survives resume+finish', async () => {
+    const create = await request(app)
+      .post(`/api/timesheet/${DATE}/entries`)
+      .send({ activityId: 'p1', description: 'W' });
+    const entryId = create.body.activeEntries[0];
+    await request(app).post(`/api/timesheet/${DATE}/entries/${entryId}/pause`);
+
+    // Edit the accumulated time + description while paused
+    const edit = await request(app)
+      .patch(`/api/timesheet/${DATE}/entries/${entryId}`)
+      .send({ totalMinutes: 40, description: 'Corrigé' });
+    const edited = edit.body.entries.find((e: any) => e.id === entryId);
+    expect(edited.totalMinutes).toBe(40);
+    expect(edited.roundedMinutes).toBe(45);
+    expect(edited.description).toBe('Corrigé');
+    expect(edited.segments).toHaveLength(1);
+
+    // Resume then finish: the manual 40 min must still be the floor of the total
+    await request(app).post(`/api/timesheet/${DATE}/entries/${entryId}/resume`);
+    const done = await request(app)
+      .patch(`/api/timesheet/${DATE}/entries/${entryId}`)
+      .send({ status: 'completed' });
+    const finished = done.body.entries.find((e: any) => e.id === entryId);
+    expect(finished.status).toBe('completed');
+    expect(finished.totalMinutes).toBeGreaterThanOrEqual(40);
+  });
+
+  it('PATCH totalMinutes does not rewrite a running (active) entry', async () => {
+    const create = await request(app)
+      .post(`/api/timesheet/${DATE}/entries`)
+      .send({ activityId: 'p1', description: 'W' });
+    const entryId = create.body.activeEntries[0];
+    const res = await request(app)
+      .patch(`/api/timesheet/${DATE}/entries/${entryId}`)
+      .send({ totalMinutes: 40 });
+    const entry = res.body.entries.find((e: any) => e.id === entryId);
+    // Still running: open segment preserved, no manual rewrite
+    expect(entry.segments.some((s: any) => s.end === null)).toBe(true);
+    expect(entry.totalMinutes).toBe(0);
+  });
 });
