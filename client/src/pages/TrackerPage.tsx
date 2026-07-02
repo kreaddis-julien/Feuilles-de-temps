@@ -11,7 +11,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { ChevronLeft, ChevronRight, Play, Pause, CircleStop, Trash2, RotateCcw, CalendarDays, Clock, Merge } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Pause, CircleStop, Trash2, RotateCcw, CalendarDays, Clock, Merge, Pencil } from 'lucide-react';
 
 async function updateTrayTitle(text: string) {
   const desktop = await import('../desktop');
@@ -345,7 +345,9 @@ export default function TrackerPage() {
     setEditingEntry(entry);
     setEditActivityId(entry.activityId);
     setEditDescription(entry.description);
-    setEditMinutes(String(entry.roundedMinutes));
+    // Completed entries expose their rounded ("indiqué") duration; paused/active
+    // ones expose the real elapsed time.
+    setEditMinutes(String(entry.status === 'completed' ? entry.roundedMinutes : entry.totalMinutes));
   }
 
   async function saveEditModal() {
@@ -354,7 +356,14 @@ export default function TrackerPage() {
     if (editActivityId !== editingEntry.activityId) updates.activityId = editActivityId;
     if (editDescription !== editingEntry.description) updates.description = editDescription;
     const parsedMin = parseInt(editMinutes, 10);
-    if (!isNaN(parsedMin) && parsedMin !== editingEntry.roundedMinutes) updates.roundedMinutes = parsedMin;
+    if (!isNaN(parsedMin)) {
+      if (editingEntry.status === 'completed') {
+        if (parsedMin !== editingEntry.roundedMinutes) updates.roundedMinutes = parsedMin;
+      } else if (parsedMin !== editingEntry.totalMinutes) {
+        // Paused entry: rewrite the accumulated time (server rewrites segments).
+        updates.totalMinutes = parsedMin;
+      }
+    }
     if (Object.keys(updates).length > 0) {
       await api.updateEntry(currentDate, editingEntry.id, updates);
       await refresh(true);
@@ -485,24 +494,24 @@ export default function TrackerPage() {
                     }}
                   />
                 </div>
-                <div className="flex flex-col items-center gap-3 sm:pl-8 sm:pr-2">
+                <div className="flex flex-col items-end gap-3 sm:pl-8">
                   <div className="font-mono text-5xl font-medium tabular-nums tracking-tight">
                     {formatTimer(elapsedMap[entry.id] ?? 0)}
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => handlePause(entry)}>
-                      <Pause className="h-3.5 w-3.5" />
-                      Pause
-                    </Button>
                     <Button size="sm" onClick={() => handleFinish(entry)}>
                       <CircleStop className="h-3.5 w-3.5" />
                       Terminer
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => handlePause(entry)} title="Pause">
+                      <Pause className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
                       onClick={() => handleDeleteEntry(entry.id)}
+                      title="Supprimer"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -522,17 +531,14 @@ export default function TrackerPage() {
             {pausedEntries.map(entry => (
               <Card key={entry.id} className="py-3 gap-0">
                 <CardContent className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex items-center gap-3">
-                    <Pause className="h-4 w-4 shrink-0 text-warning-foreground/70" />
-                    <div className="min-w-0">
-                      <p className="text-sm truncate">
-                        <span className="font-medium">{entryLabel(entry, activities.activities, customers.customers)}</span>
-                        <span className="font-mono text-xs text-muted-foreground"> · {formatDuration(entry.totalMinutes)}</span>
-                      </p>
-                      {entry.description && (
-                        <p className="text-xs text-muted-foreground truncate mt-0.5">{entry.description}</p>
-                      )}
-                    </div>
+                  <div className="min-w-0 pl-[13px]">
+                    <p className="text-sm truncate">
+                      <span className="font-medium">{entryLabel(entry, activities.activities, customers.customers)}</span>
+                      <span className="font-mono text-xs text-muted-foreground"> · {formatDuration(entry.totalMinutes)}</span>
+                    </p>
+                    {entry.description && (
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">{entry.description}</p>
+                    )}
                   </div>
                   <div className="flex gap-1.5 shrink-0">
                     <Button variant="outline" size="sm" onClick={() => handleResume(entry.id)}>
@@ -542,9 +548,18 @@ export default function TrackerPage() {
                     <Button
                       variant="ghost"
                       size="sm"
+                      onClick={() => openEditModal(entry)}
+                      title="Modifier"
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
                       onClick={() => handleDeleteEntry(entry.id)}
-                      title="Annuler"
+                      title="Supprimer"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>

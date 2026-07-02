@@ -50,6 +50,21 @@ export function createTimesheetRouter(storage: Storage) {
       if (req.body.roundedMinutes !== undefined) entry.roundedMinutes = req.body.roundedMinutes;
       if (req.body.activityId !== undefined) entry.activityId = req.body.activityId;
       if (req.body.deferred !== undefined) entry.deferred = req.body.deferred;
+
+      // Manual duration edit on an entry with no running segment (e.g. paused).
+      // Rewrite the segments to a single one of that length so the edit survives
+      // resume + finish, which recompute totalMinutes/roundedMinutes from segments.
+      if (req.body.totalMinutes !== undefined) {
+        const openSeg = entry.segments.find((s) => s.end === null);
+        const mins = Math.round(Number(req.body.totalMinutes));
+        if (!openSeg && Number.isFinite(mins) && mins >= 0) {
+          const start = entry.segments[0]?.start ?? new Date(Date.now() - mins * 60000).toISOString();
+          const end = new Date(new Date(start).getTime() + mins * 60000).toISOString();
+          entry.segments = [{ start, end }];
+          entry.totalMinutes = mins;
+          entry.roundedMinutes = roundUp15(mins);
+        }
+      }
     }
 
     await storage.saveTimesheet(data);

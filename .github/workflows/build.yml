@@ -1,0 +1,78 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # macOS only: this app distributes an unsigned macOS build (the in-app
+    # notifier links to the .dmg). No other platform is targeted.
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build client
+        run: npm run build:client
+
+      - name: Build server bundle
+        run: npm run build:server-bundle
+
+      - name: Build (electron-builder)
+        run: npx electron-builder --mac --publish never
+        env:
+          # No Apple Developer ID -> build UNSIGNED. Disable identity
+          # auto-discovery so electron-builder doesn't try to sign (an empty
+          # CSC_LINK would be treated as a cert path and fail). The afterPack
+          # hook then ad-hoc signs the app so it stays openable.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-mac
+          path: |
+            dist-electron/*.dmg
+            dist-electron/*.dmg.blockmap
+            dist-electron/*.zip
+            dist-electron/*.zip.blockmap
+            dist-electron/latest*.yml
+          if-no-files-found: ignore
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Published (not draft): the in-app update notifier reads the repo's
+          # latest PUBLISHED release via the GitHub API — a draft is invisible to it.
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME#v}" \
+            --notes "Release automatique pour ${GITHUB_REF_NAME}." \
+            dist/*
