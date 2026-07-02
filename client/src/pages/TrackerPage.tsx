@@ -531,17 +531,14 @@ export default function TrackerPage() {
             {pausedEntries.map(entry => (
               <Card key={entry.id} className="py-3 gap-0">
                 <CardContent className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex items-center gap-3">
-                    <Pause className="h-4 w-4 shrink-0 text-warning-foreground/70" />
-                    <div className="min-w-0">
-                      <p className="text-sm truncate">
-                        <span className="font-medium">{entryLabel(entry, activities.activities, customers.customers)}</span>
-                        <span className="font-mono text-xs text-muted-foreground"> · {formatDuration(entry.totalMinutes)}</span>
-                      </p>
-                      {entry.description && (
-                        <p className="text-xs text-muted-foreground truncate mt-0.5">{entry.description}</p>
-                      )}
-                    </div>
+                  <div className="min-w-0">
+                    <p className="text-sm truncate">
+                      <span className="font-medium">{entryLabel(entry, activities.activities, customers.customers)}</span>
+                      <span className="font-mono text-xs text-muted-foreground"> · {formatDuration(entry.totalMinutes)}</span>
+                    </p>
+                    {entry.description && (
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">{entry.description}</p>
+                    )}
                   </div>
                   <div className="flex gap-1.5 shrink-0">
                     <Button variant="outline" size="sm" onClick={() => handleResume(entry.id)}>
