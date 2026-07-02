@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Download, Moon, Sun, Clock, X } from 'lucide-react';
+import { Download, Moon, Sun, Monitor, Clock, X } from 'lucide-react';
 import { DatePicker } from '@/components/ui/date-picker';
 import type { TimesheetEntry } from './types';
 import TrackerPage from './pages/TrackerPage';
@@ -13,10 +13,12 @@ import TrayPopupPage from './pages/TrayPopupPage';
 import { UpdateBanner } from './components/UpdateBanner';
 import * as api from './api';
 
-function getInitialTheme(): 'light' | 'dark' {
+type ThemePref = 'light' | 'dark' | 'auto';
+
+function getInitialThemePref(): ThemePref {
   const stored = localStorage.getItem('theme');
-  if (stored === 'light' || stored === 'dark') return stored;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  if (stored === 'light' || stored === 'dark' || stored === 'auto') return stored;
+  return 'auto';
 }
 
 function todayStr(): string {
@@ -53,7 +55,7 @@ function AppInner() {
   // Electron loads the popup window with a hash: #/tray-popup
   const isTrayPopup = typeof window !== 'undefined' && window.location.hash.includes('#/tray-popup');
 
-  const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
+  const [themePref, setThemePref] = useState<ThemePref>(getInitialThemePref);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFrom, setExportFrom] = useState('');
   const [exportTo, setExportTo] = useState('');
@@ -78,9 +80,19 @@ function AppInner() {
   }, [refreshDeferred]);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+    localStorage.setItem('theme', themePref);
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      const dark = themePref === 'dark' || (themePref === 'auto' && mq.matches);
+      document.documentElement.classList.toggle('dark', dark);
+    };
+    apply();
+    // In auto mode, follow the system theme live.
+    if (themePref === 'auto') {
+      mq.addEventListener('change', apply);
+      return () => mq.removeEventListener('change', apply);
+    }
+  }, [themePref]);
 
   function openExportDialog() {
     setExportMode('week');
@@ -200,10 +212,14 @@ function AppInner() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')}
-            title={theme === 'light' ? 'Mode sombre' : 'Mode clair'}
+            onClick={() => setThemePref(p => (p === 'auto' ? 'light' : p === 'light' ? 'dark' : 'auto'))}
+            title={`Thème : ${themePref === 'auto' ? 'Auto (système)' : themePref === 'light' ? 'Clair' : 'Sombre'}`}
           >
-            {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+            {themePref === 'auto'
+              ? <Monitor className="h-4 w-4" />
+              : themePref === 'light'
+                ? <Sun className="h-4 w-4" />
+                : <Moon className="h-4 w-4" />}
           </Button>
         </div>
         </div>
