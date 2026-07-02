@@ -494,7 +494,7 @@ export default function TrackerPage() {
                     }}
                   />
                 </div>
-                <div className="flex flex-col items-center gap-3 sm:pl-8 sm:pr-2">
+                <div className="flex flex-col items-end gap-3 sm:pl-8">
                   <div className="font-mono text-5xl font-medium tabular-nums tracking-tight">
                     {formatTimer(elapsedMap[entry.id] ?? 0)}
                   </div>
