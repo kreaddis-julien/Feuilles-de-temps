@@ -113,6 +113,30 @@ export function createTimesheetRouter(storage: Storage) {
     res.json(data);
   });
 
+  // Reopen a completed entry: turn it back into a running timer, keeping its
+  // accumulated time. On finish it will be recomputed from the segments, so we
+  // first make sure the closed segments actually reflect totalMinutes (merged or
+  // manually-edited entries may carry placeholder segments), then add an open one.
+  router.post('/:date/entries/:id/reopen', async (req, res) => {
+    const data = await storage.loadTimesheet(req.params.date);
+    const entry = data.entries.find((e) => e.id === req.params.id);
+    if (!entry) return res.status(404).json({ error: 'Not found' });
+
+    const closedTotal = calcTotalMinutes(entry.segments);
+    if (closedTotal !== entry.totalMinutes) {
+      const start = entry.segments[0]?.start ?? new Date(Date.now() - entry.totalMinutes * 60000).toISOString();
+      const end = new Date(new Date(start).getTime() + entry.totalMinutes * 60000).toISOString();
+      entry.segments = [{ start, end }];
+    }
+    entry.segments.push({ start: nowTimestamp(), end: null });
+    entry.status = 'active';
+    if (!data.activeEntries.includes(entry.id)) data.activeEntries.push(entry.id);
+    data.pausedEntries = data.pausedEntries.filter((id) => id !== entry.id);
+
+    await storage.saveTimesheet(data);
+    res.json(data);
+  });
+
   // Merge: create a completed entry and delete originals
   router.post('/:date/entries/merge', async (req, res) => {
     const data = await storage.loadTimesheet(req.params.date);
