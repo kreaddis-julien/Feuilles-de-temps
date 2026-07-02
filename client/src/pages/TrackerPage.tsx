@@ -499,19 +499,19 @@ export default function TrackerPage() {
                     {formatTimer(elapsedMap[entry.id] ?? 0)}
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => handlePause(entry)}>
-                      <Pause className="h-3.5 w-3.5" />
-                      Pause
-                    </Button>
                     <Button size="sm" onClick={() => handleFinish(entry)}>
                       <CircleStop className="h-3.5 w-3.5" />
                       Terminer
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => handlePause(entry)} title="Pause">
+                      <Pause className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
                       onClick={() => handleDeleteEntry(entry.id)}
+                      title="Supprimer"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -544,6 +544,10 @@ export default function TrackerPage() {
                     </div>
                   </div>
                   <div className="flex gap-1.5 shrink-0">
+                    <Button variant="outline" size="sm" onClick={() => handleResume(entry.id)}>
+                      <Play className="h-3.5 w-3.5" />
+                      Reprendre
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -552,18 +556,13 @@ export default function TrackerPage() {
                       className="text-muted-foreground hover:text-foreground"
                     >
                       <Pencil className="h-3.5 w-3.5" />
-                      Modifier
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => handleResume(entry.id)}>
-                      <Play className="h-3.5 w-3.5" />
-                      Reprendre
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
                       onClick={() => handleDeleteEntry(entry.id)}
-                      title="Annuler"
+                      title="Supprimer"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
