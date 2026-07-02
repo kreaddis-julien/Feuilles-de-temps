@@ -601,7 +601,7 @@ export default function TrackerPage() {
                   <TableHead className="text-xs font-medium text-muted-foreground">Description</TableHead>
                   <TableHead className="w-[4.5rem] text-xs font-medium text-muted-foreground text-right">Réel</TableHead>
                   <TableHead className="w-[4.5rem] text-xs font-medium text-muted-foreground text-right">Durée</TableHead>
-                  <TableHead className="w-[6rem]"></TableHead>
+                  <TableHead className="w-[8.5rem]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
