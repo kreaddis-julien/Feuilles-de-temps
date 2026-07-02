@@ -270,6 +270,11 @@ export default function TrackerPage() {
     await refresh(true);
   }
 
+  async function handleReopen(id: string) {
+    await api.reopenEntry(currentDate, id);
+    await refresh(true);
+  }
+
   async function handleDuplicate(entry: TimesheetEntry) {
     await api.createEntry(currentDate, {
       activityId: entry.activityId,
@@ -596,7 +601,7 @@ export default function TrackerPage() {
                   <TableHead className="text-xs font-medium text-muted-foreground">Description</TableHead>
                   <TableHead className="w-[4.5rem] text-xs font-medium text-muted-foreground text-right">Réel</TableHead>
                   <TableHead className="w-[4.5rem] text-xs font-medium text-muted-foreground text-right">Durée</TableHead>
-                  <TableHead className="w-[6rem]"></TableHead>
+                  <TableHead className="w-[8.5rem]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -642,8 +647,17 @@ export default function TrackerPage() {
                         <Button
                           variant="ghost"
                           size="icon-xs"
+                          onClick={() => handleReopen(entry.id)}
+                          title="Remettre en cours"
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <Play className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
                           onClick={() => handleDuplicate(entry)}
-                          title="Relancer"
+                          title="Relancer (nouvelle entrée)"
                           className="text-muted-foreground hover:text-foreground"
                         >
                           <RotateCcw className="h-3 w-3" />

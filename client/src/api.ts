@@ -32,6 +32,9 @@ export const pauseEntry = (date: string, id: string) =>
 export const resumeEntry = (date: string, id: string) =>
   json<TimesheetDay>(`/timesheet/${date}/entries/${id}/resume`, { method: 'POST' });
 
+export const reopenEntry = (date: string, id: string) =>
+  json<TimesheetDay>(`/timesheet/${date}/entries/${id}/reopen`, { method: 'POST' });
+
 // Customers
 export const getCustomers = () =>
   json<CustomersData>('/customers');

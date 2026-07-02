@@ -171,6 +171,33 @@ describe('Timesheet API', () => {
     expect(finished.totalMinutes).toBeGreaterThanOrEqual(40);
   });
 
+  it('POST /reopen turns a completed entry back into a running timer, keeping its time', async () => {
+    const create = await request(app)
+      .post(`/api/timesheet/${DATE}/entries`)
+      .send({ activityId: 'p1', description: 'W' });
+    const entryId = create.body.activeEntries[0];
+    // Pause to accumulate a fixed duration, then edit it to a known value, then finish
+    await request(app).post(`/api/timesheet/${DATE}/entries/${entryId}/pause`);
+    await request(app)
+      .patch(`/api/timesheet/${DATE}/entries/${entryId}`)
+      .send({ totalMinutes: 30 });
+    await request(app)
+      .patch(`/api/timesheet/${DATE}/entries/${entryId}`)
+      .send({ status: 'completed' });
+
+    const res = await request(app).post(`/api/timesheet/${DATE}/entries/${entryId}/reopen`);
+    expect(res.status).toBe(200);
+    const entry = res.body.entries.find((e: any) => e.id === entryId);
+    expect(entry.status).toBe('active');
+    expect(entry.segments.some((s: any) => s.end === null)).toBe(true);
+    expect(res.body.activeEntries).toContain(entryId);
+    // Closed segments still represent the accumulated 30 min
+    const closed = entry.segments.filter((s: any) => s.end !== null);
+    const closedTotal = closed.reduce((sum: number, s: any) =>
+      sum + Math.floor((new Date(s.end).getTime() - new Date(s.start).getTime()) / 60000), 0);
+    expect(closedTotal).toBe(30);
+  });
+
   it('PATCH totalMinutes does not rewrite a running (active) entry', async () => {
     const create = await request(app)
       .post(`/api/timesheet/${DATE}/entries`)
