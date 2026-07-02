@@ -531,7 +531,7 @@ export default function TrackerPage() {
             {pausedEntries.map(entry => (
               <Card key={entry.id} className="py-3 gap-0">
                 <CardContent className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
+                  <div className="min-w-0 pl-[13px]">
                     <p className="text-sm truncate">
                       <span className="font-medium">{entryLabel(entry, activities.activities, customers.customers)}</span>
                       <span className="font-mono text-xs text-muted-foreground"> · {formatDuration(entry.totalMinutes)}</span>
