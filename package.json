@@ -4,6 +4,7 @@
   "type": "module",
   "version": "0.1.0",
   "description": "Gestionnaire de feuilles de temps - time tracker for Odoo timesheets",
+  "author": "KreAddis",
   "main": "electron/main.js",
   "workspaces": [
     "client",
@@ -20,6 +21,7 @@
     "build:client": "npm run build --workspace=client",
     "dev:electron": "npm run build:server-bundle && concurrently -k \"npm run dev:client\" \"electron . --dev\"",
     "build:app": "npm run build:client && npm run build:server-bundle && electron-builder",
+    "release": "npm run build:client && npm run build:server-bundle && electron-builder --publish always",
     "install:app": "pkill -f 'Gestionnaire de feuilles de temps' || true; pkill -f 'Tempo.app' || true; sleep 1; rm -rf '/Applications/Tempo.app'; cp -R 'dist-electron/mac-arm64/Gestionnaire de feuilles de temps.app' /Applications/ && open '/Applications/Gestionnaire de feuilles de temps.app'"
   },
   "devDependencies": {
@@ -38,11 +40,51 @@
       "electron/**/*",
       "client/dist/**/*"
     ],
+    "afterPack": "./scripts/afterpack-adhoc.cjs",
+    "publish": {
+      "provider": "github",
+      "owner": "kreaddis-julien",
+      "repo": "Feuilles-de-temps"
+    },
     "mac": {
       "icon": "electron/icons/icon.icns",
       "category": "public.app-utility",
       "target": [
-        "dir"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "notarize": false
+    },
+    "dmg": {
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 150,
+          "y": 190
+        },
+        {
+          "x": 390,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     }
   }

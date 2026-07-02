@@ -1,6 +1,7 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, dialog } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, dialog, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import https from 'node:https';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +18,78 @@ let tray = null;
 function frontendUrl(hash = '') {
   if (IS_DEV) return `http://localhost:5173/${hash}`;
   return `http://localhost:${PORT}/${hash}`;
+}
+
+// ── Update notifier (notify-only, unsigned build) ───────────────────────────
+// The app is distributed as an unsigned .dmg, so there is no in-app auto-update
+// (electron-updater needs a signed build to install). Instead, on launch and
+// once a day we query the repo's latest GitHub release; if it is newer than the
+// running version we tell the renderer to show a dismissable "vX available —
+// Download" banner that opens the release page. Reading public releases needs
+// no signing and no token.
+const UPDATE_REPO = 'kreaddis-julien/Feuilles-de-temps';
+
+function isNewerVersion(remote, current) {
+  const a = String(remote).split('.').map(n => parseInt(n, 10) || 0);
+  const b = String(current).split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) > (b[i] || 0)) return true;
+    if ((a[i] || 0) < (b[i] || 0)) return false;
+  }
+  return false;
+}
+
+function fetchLatestRelease() {
+  return new Promise((resolve, reject) => {
+    const req = https.get({
+      hostname: 'api.github.com',
+      path: `/repos/${UPDATE_REPO}/releases/latest`,
+      headers: { 'User-Agent': 'feuilles-de-temps-app', 'Accept': 'application/vnd.github+json' },
+      timeout: 10000,
+    }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error('HTTP ' + res.statusCode)); }
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+  });
+}
+
+// Query the latest release and compare it to the running version. Returns a
+// structured result used both by the automatic notifier and the manual
+// "check for updates" button in Settings.
+async function getUpdateStatus() {
+  const rel = await fetchLatestRelease();
+  const tag = rel && rel.tag_name;
+  if (!tag) throw new Error('no tag in latest release');
+  const remote = String(tag).replace(/^v/, '');
+  return {
+    available: isNewerVersion(remote, app.getVersion()),
+    version: remote,
+    current: app.getVersion(),
+    url: rel.html_url,
+  };
+}
+
+// Push the "update available" banner to the renderer if a newer release exists.
+function notifyIfAvailable(status) {
+  if (status.available && mainWindow && !mainWindow.isDestroyed()) {
+    console.log(`[update-check] newer release available: v${status.version}`);
+    mainWindow.webContents.send('updater-event', 'update-available', {
+      version: status.version,
+      url: status.url,
+    });
+  }
+}
+
+async function checkForUpdateNotification() {
+  try {
+    notifyIfAvailable(await getUpdateStatus());
+  } catch (e) {
+    console.warn('[update-check] ' + (e && e.message ? e.message : String(e)));
+  }
 }
 
 // ── Embedded server (replaces the Tauri sidecar binary) ────────────────────
@@ -269,6 +342,30 @@ ipcMain.on('open-main-window', () => {
   mainWindow.focus();
 });
 
+// Current app version, for display in Settings.
+ipcMain.handle('get-app-version', () => app.getVersion());
+
+// Manual "check for updates" from Settings. Returns the status so the UI can
+// show explicit feedback (up to date / new version / error); also fires the
+// banner if a newer release exists.
+ipcMain.handle('updater-check', async () => {
+  try {
+    const status = await getUpdateStatus();
+    notifyIfAvailable(status);
+    return { ok: true, ...status };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : String(e), current: app.getVersion() };
+  }
+});
+
+// Open the release page in the default browser. Restricted to GitHub https URLs
+// so a compromised renderer can't turn this into an arbitrary-URL opener.
+ipcMain.on('open-external', (_event, url) => {
+  if (typeof url === 'string' && /^https:\/\/github\.com\//.test(url)) {
+    shell.openExternal(url);
+  }
+});
+
 // ── App lifecycle ────────────────────────────────────────────────────────────
 
 app.isQuittingForReal = false;
@@ -294,6 +391,10 @@ app.whenReady().then(async () => {
   // Autostart at login (replaces tauri-plugin-autostart)
   if (!IS_DEV) {
     app.setLoginItemSettings({ openAtLogin: true });
+    // Update notifier: check shortly after launch, then once a day. Dev builds
+    // don't nag (they'd always look "behind" the latest release).
+    setTimeout(checkForUpdateNotification, 10000);
+    setInterval(checkForUpdateNotification, 24 * 60 * 60 * 1000);
   }
 
   app.on('activate', () => {

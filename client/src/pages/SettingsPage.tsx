@@ -7,7 +7,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import { Search, X, Plus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, X, Plus, Trash2, ChevronLeft, ChevronRight, RefreshCw, Download } from 'lucide-react';
+import { isDesktop, getAppVersion, checkForUpdates, openExternal } from '@/desktop';
+
+const RELEASES_URL = 'https://github.com/kreaddis-julien/Feuilles-de-temps/releases/latest';
 
 export default function SettingsPage() {
   const [activities, setActivities] = useState<ActivitiesData>({ activities: [] });
@@ -29,6 +32,12 @@ export default function SettingsPage() {
   const existingNames = [...new Set(activities.activities.map(a => a.name))];
   const activityCategories = [...new Set([...defaultCategories, ...existingNames])].sort((a, b) => a.localeCompare(b, 'fr'));
 
+  // App version + update check (desktop only)
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState<{ text: string; kind: 'available' | 'uptodate' | 'error' } | null>(null);
+  const [updateUrl, setUpdateUrl] = useState<string | null>(null);
+
   const refresh = useCallback(async () => {
     const [a, c] = await Promise.all([api.getActivities(), api.getCustomers()]);
     setActivities(a);
@@ -36,6 +45,32 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    getAppVersion().then(v => { if (v) setAppVersion(v); });
+  }, []);
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    setUpdateMsg(null);
+    setUpdateUrl(null);
+    try {
+      const res = await checkForUpdates();
+      if (!res || !res.ok) {
+        setUpdateMsg({ text: 'Vérification impossible pour le moment.', kind: 'error' });
+      } else if (res.available) {
+        setUpdateUrl(res.url ?? RELEASES_URL);
+        setUpdateMsg({ text: `Nouvelle version disponible : v${res.version}`, kind: 'available' });
+      } else {
+        setUpdateMsg({ text: `Vous êtes à jour (v${res.current ?? appVersion}).`, kind: 'uptodate' });
+      }
+    } catch {
+      setUpdateMsg({ text: 'Vérification impossible pour le moment.', kind: 'error' });
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
 
   // --- Customers ---
   const handleCreateCustomer = async () => {
@@ -173,6 +208,49 @@ export default function SettingsPage() {
               </p>
             )}
           </div>
+        </section>
+      )}
+
+      {/* ===== À propos / Mises à jour ===== */}
+      {!editingCust && isDesktop && (
+        <section className="space-y-3 pt-2">
+          <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">À propos</h3>
+          <Card className="py-4 gap-0">
+            <CardContent className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Gestionnaire de feuilles de temps</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Version {appVersion ?? '—'}
+                </p>
+                {updateMsg && (
+                  <p
+                    className={`text-xs mt-1.5 ${
+                      updateMsg.kind === 'available'
+                        ? 'text-tempo font-medium'
+                        : updateMsg.kind === 'error'
+                          ? 'text-destructive'
+                          : 'text-muted-foreground'
+                    }`}
+                  >
+                    {updateMsg.text}
+                  </p>
+                )}
+              </div>
+              <div className="shrink-0">
+                {updateMsg?.kind === 'available' && updateUrl ? (
+                  <Button size="sm" onClick={() => openExternal(updateUrl)}>
+                    <Download className="h-4 w-4" />
+                    Télécharger
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={handleCheckUpdate} disabled={checkingUpdate}>
+                    <RefreshCw className={`h-4 w-4 ${checkingUpdate ? 'animate-spin' : ''}`} />
+                    {checkingUpdate ? 'Vérification…' : 'Vérifier les mises à jour'}
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         </section>
       )}
 

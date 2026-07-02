@@ -10,6 +10,7 @@ import TrackerPage from './pages/TrackerPage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
 import TrayPopupPage from './pages/TrayPopupPage';
+import { UpdateBanner } from './components/UpdateBanner';
 import * as api from './api';
 
 function getInitialTheme(): 'light' | 'dark' {
@@ -126,6 +127,7 @@ function AppInner() {
 
   return (
     <>
+      <UpdateBanner />
       <header className="sticky top-0 z-50 bg-background/85 backdrop-blur-md border-b border-border">
         <div className="flex items-center justify-between pl-5 pr-8 h-[52px] max-w-5xl mx-auto">
           <nav className="flex items-end self-stretch gap-1">
