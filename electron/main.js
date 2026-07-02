@@ -354,7 +354,13 @@ ipcMain.handle('updater-check', async () => {
     notifyIfAvailable(status);
     return { ok: true, ...status };
   } catch (e) {
-    return { ok: false, error: e && e.message ? e.message : String(e), current: app.getVersion() };
+    const msg = e && e.message ? e.message : String(e);
+    // 404 = the repo has no published release yet. That's not an error, there
+    // is simply nothing to update to.
+    if (msg === 'HTTP 404') {
+      return { ok: true, available: false, noRelease: true, current: app.getVersion() };
+    }
+    return { ok: false, error: msg, current: app.getVersion() };
   }
 });
 

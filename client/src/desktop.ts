@@ -9,6 +9,7 @@ export interface UpdateInfo {
 export interface UpdateCheckResult {
   ok: boolean;
   available?: boolean;
+  noRelease?: boolean;
   version?: string;
   current?: string;
   url?: string;

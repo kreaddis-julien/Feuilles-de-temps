@@ -62,6 +62,8 @@ export default function SettingsPage() {
       } else if (res.available) {
         setUpdateUrl(res.url ?? RELEASES_URL);
         setUpdateMsg({ text: `Nouvelle version disponible : v${res.version}`, kind: 'available' });
+      } else if (res.noRelease) {
+        setUpdateMsg({ text: 'Aucune version publiée pour le moment.', kind: 'uptodate' });
       } else {
         setUpdateMsg({ text: `Vous êtes à jour (v${res.current ?? appVersion}).`, kind: 'uptodate' });
       }
